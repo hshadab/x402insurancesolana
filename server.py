@@ -217,6 +217,113 @@ def parse_utc(dt_str: str) -> datetime:
     return dt
 
 
+def process_claim_async(claim_id: str):
+    """
+    Background worker function to process claim asynchronously.
+    Generates zkEngine proof and issues blockchain refund.
+    Updates claim record with final status (paid/failed).
+    """
+    try:
+        logger.info("Starting async claim processing: %s", claim_id)
+
+        # Load claim record
+        claims = load_data(CLAIMS_FILE)
+        claim = claims.get(claim_id)
+
+        if not claim:
+            logger.error("Claim not found for async processing: %s", claim_id)
+            return
+
+        # Load policy
+        policies = load_data(POLICIES_FILE)
+        policy = policies.get(claim['policy_id'])
+
+        if not policy:
+            logger.error("Policy not found for claim: %s", claim_id)
+            claim['status'] = 'failed'
+            claim['error'] = 'Policy not found'
+            claims[claim_id] = claim
+            save_data(CLAIMS_FILE, claims)
+            return
+
+        # Get HTTP response from claim
+        http_response = claim.get('http_response', {})
+
+        # Generate zkEngine proof (this is the slow part: 10-20 seconds)
+        logger.info("Generating proof for claim: %s", claim_id)
+        proof_hex, public_inputs, gen_time_ms = zkengine.generate_proof(
+            http_status=http_response["status"],
+            http_body=http_response["body"],
+            http_headers=http_response.get("headers", {})
+        )
+
+        # Verify proof (sanity check)
+        is_valid = zkengine.verify_proof(proof_hex, public_inputs)
+        if not is_valid:
+            logger.error("Proof verification failed for claim: %s", claim_id)
+            claim['status'] = 'failed'
+            claim['error'] = 'Generated proof is invalid'
+            claims[claim_id] = claim
+            save_data(CLAIMS_FILE, claims)
+            return
+
+        # Parse public inputs
+        is_fraud = public_inputs[0]
+        if is_fraud != 1:
+            logger.warning("No fraud detected for claim: %s", claim_id)
+            claim['status'] = 'failed'
+            claim['error'] = 'No fraud detected in HTTP response'
+            claims[claim_id] = claim
+            save_data(CLAIMS_FILE, claims)
+            return
+
+        # Issue USDC refund (2-5 seconds)
+        logger.info("Issuing refund for claim: %s", claim_id)
+        refund_tx_hash = blockchain.issue_refund(
+            to_address=claim['agent_address'],
+            amount=claim['coverage_amount_units']
+        )
+
+        # Update claim record with final status
+        claim['proof'] = proof_hex
+        claim['public_inputs'] = public_inputs
+        claim['proof_generation_time_ms'] = gen_time_ms
+        claim['verification_result'] = True
+        claim['payout_amount'] = claim['coverage_amount']
+        claim['payout_amount_units'] = claim['coverage_amount_units']
+        claim['refund_tx_hash'] = refund_tx_hash
+        claim['recipient_address'] = claim['agent_address']
+        claim['status'] = 'paid'
+        claim['paid_at'] = iso_utc_now()
+
+        # Remove http_response from final claim (too large, already have hash)
+        claim.pop('http_response', None)
+
+        # Save claim
+        claims[claim_id] = claim
+        save_data(CLAIMS_FILE, claims)
+
+        # Update policy status
+        policy['status'] = 'claimed'
+        policies[claim['policy_id']] = policy
+        save_data(POLICIES_FILE, policies)
+
+        logger.info("Claim processed successfully: %s, refund TX: %s", claim_id, refund_tx_hash)
+
+    except Exception as e:
+        logger.error("Error processing claim async: %s, error: %s", claim_id, str(e), exc_info=True)
+        # Mark claim as failed
+        try:
+            claims = load_data(CLAIMS_FILE)
+            if claim_id in claims:
+                claims[claim_id]['status'] = 'failed'
+                claims[claim_id]['error'] = str(e)
+                claims[claim_id]['failed_at'] = iso_utc_now()
+                save_data(CLAIMS_FILE, claims)
+        except Exception as save_error:
+            logger.error("Failed to save error status: %s", str(save_error))
+
+
 @app.before_request
 def handle_x402_payment():
     """Capture X-Payment header for verification in /insure endpoint."""
@@ -703,6 +810,11 @@ def agent_card():
                     "limit_per_minute": None,
                     "recommendation": "Implement exponential backoff if you receive 429 responses"
                 },
+                "/renew": {
+                    "limit": "20 per hour",
+                    "limit_per_minute": None,
+                    "recommendation": "Renew policies before expiration to avoid coverage gaps"
+                },
                 "general": {
                     "limit": "200 per day, 50 per hour",
                     "recommendation": "Cache discovery endpoints (agent-card, pricing, schema) to reduce request volume"
@@ -712,7 +824,8 @@ def agent_card():
                 "timeout_recommendations": {
                     "/insure": "5-10 seconds (simple x402 payment verification)",
                     "/claim": "30-45 seconds (includes zkp generation which takes 10-20s)",
-                    "/verify": "5-10 seconds (proof verification)"
+                    "/verify": "5-10 seconds (proof verification)",
+                    "/renew": "5-10 seconds (simple x402 payment verification)"
                 },
                 "memory_solution": {
                     "endpoint": "/policies?wallet=0xYourAddress",
@@ -720,9 +833,12 @@ def agent_card():
                     "use_case": "If you forget your policy_id after context reset, query by wallet address"
                 },
                 "policy_expiration": {
-                    "duration": "24 hours",
+                    "duration": "24 hours (initial)",
+                    "max_extension": "168 hours (7 days)",
                     "grace_period": None,
-                    "recommendation": "Monitor policy expiration and file claims before 24-hour window closes"
+                    "renewal_available": True,
+                    "renewal_endpoint": "/renew",
+                    "recommendation": "Use /renew endpoint to extend policies before expiration. Pro-rated fees: 24h extension = full premium."
                 },
                 "error_handling": {
                     "429_rate_limit": "Implement exponential backoff (1s, 2s, 4s, 8s...)",
@@ -932,7 +1048,142 @@ def get_policies():
         "active_policies": agent_policies,
         "total_coverage": sum(p["coverage_amount"] for p in agent_policies),
         "claim_endpoint": "/claim",
+        "renew_endpoint": "/renew",
         "note": "Use policy_id from any active policy to file a claim if merchant fails"
+    }), 200
+
+
+@app.route('/renew', methods=['POST'])
+@limiter.limit("20 per hour")
+def renew_policy():
+    """
+    Renew/extend an existing policy before expiration.
+
+    Requires x402 payment for renewal fee (pro-rated based on extension duration).
+
+    Body:
+      {
+        "policy_id": "uuid",
+        "extend_hours": 24  // Number of hours to extend (default 24, max 168 = 7 days)
+      }
+
+    Returns:
+      {
+        "policy_id": "uuid",
+        "old_expires_at": "2025-11-08T10:00:00Z",
+        "new_expires_at": "2025-11-09T10:00:00Z",
+        "extension_hours": 24,
+        "renewal_fee": 0.0001,
+        "renewal_count": 1,
+        "status": "active"
+      }
+    """
+    data = request.json
+    policy_id = data.get('policy_id')
+    extend_hours = data.get('extend_hours', 24)
+
+    if not policy_id:
+        return jsonify({"error": "Missing policy_id"}), 400
+
+    if extend_hours < 1 or extend_hours > 168:  # Max 7 days
+        return jsonify({"error": "extend_hours must be between 1 and 168 (7 days)"}), 400
+
+    # Load policy
+    policies = load_data(POLICIES_FILE)
+    policy = policies.get(policy_id)
+
+    if not policy:
+        return jsonify({"error": "Policy not found"}), 404
+
+    if policy['status'] != 'active':
+        return jsonify({"error": f"Can only renew active policies (current status: {policy['status']})"}), 400
+
+    # Check if already expired
+    expires_at = parse_utc(policy["expires_at"])
+    if expires_at < datetime.now(timezone.utc):
+        return jsonify({"error": "Cannot renew expired policy. Please purchase a new policy."}), 400
+
+    # Calculate renewal fee (pro-rated: percentage of coverage for extended duration)
+    # Example: 24h extension = full premium, 12h = half premium
+    hours_per_day = 24
+    days_extended = extend_hours / hours_per_day
+    renewal_fee = policy['coverage_amount'] * PREMIUM_PERCENTAGE * days_extended
+    renewal_fee_units = to_micro(renewal_fee)
+
+    # Check x402 payment
+    payment_header = request.headers.get('X-Payment')
+    payer_header = request.headers.get('X-Payer')
+
+    if not payment_header or not payer_header:
+        # Return 402 with renewal fee details
+        required = {
+            "x402Version": 1,
+            "payment": {
+                "scheme": "exact",
+                "network": "base",
+                "amount": str(renewal_fee_units),
+                "asset": USDC_ADDRESS,
+                "pay_to": BACKEND_ADDRESS,
+                "description": f"Policy renewal fee for {extend_hours} hours extension",
+                "maxTimeoutSeconds": 60
+            },
+            "policy_id": policy_id,
+            "extend_hours": extend_hours,
+            "renewal_fee": renewal_fee,
+            "renewal_fee_display": f"{renewal_fee} USDC",
+            "current_expires_at": policy['expires_at'],
+            "new_expires_at": (expires_at + timedelta(hours=extend_hours)).isoformat()
+        }
+        headers = {"X-Payment-Required": json.dumps(required["payment"])}
+        return jsonify(required), 402, headers
+
+    # Verify payment
+    payment_details = payment_verifier.verify_payment(
+        payment_header=payment_header,
+        payer_address=payer_header,
+        required_amount=renewal_fee_units,
+        max_age_seconds=config.PAYMENT_MAX_AGE_SECONDS
+    )
+
+    if not payment_details.is_valid:
+        logger.warning("Payment verification failed for renewal: policy=%s, fee=%s units", policy_id, renewal_fee_units)
+        return jsonify({
+            "error": "Payment verification failed",
+            "expected_amount": str(renewal_fee_units),
+            "asset": {"address": USDC_ADDRESS, "decimals": 6, "symbol": "USDC"},
+            "pay_to": BACKEND_ADDRESS
+        }), 402
+
+    # Verify payer is the policy owner
+    if payment_details.payer.lower() != policy['agent_address'].lower():
+        return jsonify({"error": "Only policy owner can renew policy"}), 403
+
+    # Extend policy expiration
+    old_expires_at = expires_at
+    new_expires_at = old_expires_at + timedelta(hours=extend_hours)
+
+    policy['expires_at'] = new_expires_at.isoformat()
+    policy['renewed_at'] = iso_utc_now()
+    policy['renewal_count'] = policy.get('renewal_count', 0) + 1
+    policy['total_renewal_fees'] = policy.get('total_renewal_fees', 0.0) + renewal_fee
+
+    # Save updated policy
+    policies[policy_id] = policy
+    save_data(POLICIES_FILE, policies)
+
+    logger.info("Policy renewed: %s, extended by %d hours", policy_id, extend_hours)
+
+    return jsonify({
+        "policy_id": policy_id,
+        "old_expires_at": old_expires_at.isoformat(),
+        "new_expires_at": policy['expires_at'],
+        "extension_hours": extend_hours,
+        "renewal_fee": renewal_fee,
+        "renewal_fee_display": f"{renewal_fee} USDC",
+        "renewal_count": policy['renewal_count'],
+        "total_paid": policy['premium'] + policy['total_renewal_fees'],
+        "status": "active",
+        "message": f"Policy successfully extended by {extend_hours} hours"
     }), 200
 
 
@@ -940,7 +1191,10 @@ def get_policies():
 @limiter.limit("5 per hour")
 def claim():
     """
-    Submit fraud claim
+    Submit fraud claim (supports async processing)
+
+    Query params (optional):
+      async: bool (default: false) - If true, returns immediately with status "processing"
 
     Headers (optional):
       Idempotency-Key: string (prevents duplicate claims if retried)
@@ -955,7 +1209,7 @@ def claim():
         }
       }
 
-    Returns:
+    Returns (sync mode):
       {
         "claim_id": "uuid",
         "policy_id": "uuid",
@@ -965,6 +1219,16 @@ def claim():
         "refund_tx_hash": "0x...",
         "status": "paid",
         "proof_url": "/proofs/uuid"
+      }
+
+    Returns (async mode):
+      {
+        "claim_id": "uuid",
+        "policy_id": "uuid",
+        "status": "processing",
+        "estimated_completion_seconds": 20,
+        "poll_url": "/claims/uuid",
+        "message": "Claim is being processed. Poll /claims/{claim_id} for status."
       }
     """
     data = request.json
@@ -1009,6 +1273,57 @@ def claim():
     if parse_utc(policy["expires_at"]) < datetime.now(timezone.utc):
         return jsonify({"error": "Policy expired"}), 400
 
+    # Check if async mode requested
+    async_mode = request.args.get('async', 'false').lower() in ('true', '1', 'yes')
+
+    if async_mode:
+        # Async mode: Create claim record with "processing" status and process in background
+        claim_id = str(uuid.uuid4())
+        http_body_hash = hashlib.sha256(http_response["body"].encode()).hexdigest()
+
+        claim_record = {
+            "claim_id": claim_id,
+            "policy_id": policy_id,
+            "status": "processing",
+            "http_response": http_response,  # Store for background processing
+            "http_status": http_response["status"],
+            "http_body_hash": http_body_hash,
+            "http_headers": http_response.get("headers", {}),
+            "agent_address": policy["agent_address"],
+            "coverage_amount": policy.get("coverage_amount"),
+            "coverage_amount_units": policy.get("coverage_amount_units") or to_micro(policy.get("coverage_amount")),
+            "created_at": iso_utc_now(),
+            "idempotency_key": idempotency_key
+        }
+
+        # Save claim with "processing" status
+        claims = load_data(CLAIMS_FILE)
+        claims[claim_id] = claim_record
+        save_data(CLAIMS_FILE, claims)
+
+        # Start background thread to process claim
+        import threading
+        thread = threading.Thread(
+            target=process_claim_async,
+            args=(claim_id,),
+            daemon=True
+        )
+        thread.start()
+
+        logger.info("Claim submitted for async processing: %s", claim_id)
+
+        # Return immediately with 202 Accepted
+        return jsonify({
+            "claim_id": claim_id,
+            "policy_id": policy_id,
+            "status": "processing",
+            "estimated_completion_seconds": 20,
+            "poll_url": f"/claims/{claim_id}",
+            "message": "Claim is being processed in the background. Poll /claims/{claim_id} for status.",
+            "async_mode": True
+        }), 202  # 202 Accepted
+
+    # Synchronous mode (default): Process claim inline
     # Generate zkEngine proof
     try:
         proof_hex, public_inputs, gen_time_ms = zkengine.generate_proof(

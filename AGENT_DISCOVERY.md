@@ -8,15 +8,18 @@ This document describes how autonomous agents can discover and interact with the
 1. **Memory Solution**: Use `GET /policies?wallet=0xYourAddress` to recover policy_id after context resets
 2. **Idempotency**: Add `Idempotency-Key` header to `/claim` requests to safely retry
 3. **Claim Status**: Poll `GET /claims/{claim_id}` to check claim progress
-4. **Rate Limits**: See agent card metadata for limits (10/hour for /insure, 5/hour for /claim)
-5. **Timeout Guidance**: Use 30-45s timeout for `/claim` (includes 10-20s zkp generation)
+4. **Async Proof Generation**: Use `/claim?async=true` to avoid 15-30s blocking wait (NEW!)
+5. **Policy Renewal**: Extend policies before 24h expiration with `/renew` endpoint (NEW!)
+6. **Rate Limits**: See agent card metadata for limits (10/hour for /insure, 5/hour for /claim, 20/hour for /renew)
+7. **Timeout Guidance**: Use 30-45s timeout for `/claim` in sync mode, or use async mode to avoid timeouts
 
 **Critical Endpoints:**
 - `/.well-known/agent-card.json` - Complete service discovery (includes rate limits, timeouts, error handling)
 - `/policies?wallet=0x...` - **Retrieve your policies by wallet address** (solves memory problem!)
 - `/claims/{claim_id}` - Check claim status
 - `/insure` - Purchase policy (x402 payment required)
-- `/claim` - File fraud claim (with idempotency support)
+- `/claim` - File fraud claim (supports sync/async modes, idempotency)
+- `/renew` - **Extend policy before expiration** (x402 payment required) (NEW!)
 
 ## Discovery Endpoints
 
@@ -674,19 +677,40 @@ claim_response = requests.post('/claim', json={
 # Problem: zkp generation takes 10-20 seconds, request times out
 import httpx
 
-# ❌ BAD: Default timeout (5s)
+# ❌ BAD: Default timeout (5s) in sync mode
 response = httpx.post('/claim', json=claim_data)  # Times out!
 
-# ✅ GOOD: Use appropriate timeout
+# ✅ OPTION 1: Use async mode (BEST - no timeout risk!)
+response = httpx.post('/claim?async=true',
+    headers={'Idempotency-Key': str(uuid.uuid4())},
+    json=claim_data,
+    timeout=10.0  # Short timeout OK, returns immediately
+)
+# Response: 202 Accepted
+# {
+#   "claim_id": "uuid",
+#   "status": "processing",
+#   "poll_url": "/claims/uuid"
+# }
+
+# Poll for completion
+import time
+claim_id = response.json()['claim_id']
+for _ in range(30):  # Poll for up to 60 seconds
+    status = httpx.get(f'/claims/{claim_id}').json()
+    if status['status'] == 'paid':
+        print(f"✅ Refund received! TX: {status['refund_tx_hash']}")
+        break
+    time.sleep(2)
+
+# ✅ OPTION 2: Use longer timeout in sync mode
 response = httpx.post('/claim',
     json=claim_data,
     timeout=45.0  # 30-45 seconds recommended
 )
 
-# OR: Use idempotency for safe retry
-import uuid
+# ✅ OPTION 3: Use idempotency for safe retry
 idempotency_key = str(uuid.uuid4())
-
 try:
     response = httpx.post('/claim',
         headers={'Idempotency-Key': idempotency_key},
@@ -705,8 +729,12 @@ except httpx.TimeoutException:
 
 **Recommended Timeouts:**
 - `/insure`: 5-10 seconds
-- `/claim`: 30-45 seconds (includes zkp generation)
+- `/claim` (async mode): 5-10 seconds (returns immediately)
+- `/claim` (sync mode): 30-45 seconds (includes zkp generation)
+- `/renew`: 5-10 seconds
 - `/verify`: 5-10 seconds
+
+**Pro Tip:** Use `async=true` to avoid all timeout issues!
 
 ---
 
@@ -757,13 +785,90 @@ def monitor_policies(agent_wallet):
             # File claim ASAP if merchant has failed
 ```
 
-**Policy Duration:** 24 hours from creation
+**Policy Duration:** 24 hours from creation (initial)
+**Max Extension:** 168 hours (7 days total)
 **Grace Period:** None
-**Recommendation:** File claims within 23 hours of policy creation
+**Recommendation:** Use `/renew` endpoint to extend policies before expiration, or file claims within 23 hours
+
+**NEW: Policy Renewal Solution**
+```python
+# Better solution: Renew policy before expiration!
+policies = requests.get(f'/policies?wallet={agent_wallet.address}').json()
+
+for policy in policies['active_policies']:
+    expires_at = datetime.fromisoformat(policy['expires_at'].replace('Z', '+00:00'))
+    time_remaining = expires_at - datetime.now(timezone.utc)
+
+    if time_remaining < timedelta(hours=2):
+        # Renew policy for another 24 hours
+        renewal = x402.post('/renew', json={
+            'policy_id': policy['policy_id'],
+            'extend_hours': 24  # Can extend 1-168 hours
+        })
+        print(f"✅ Policy renewed until {renewal['new_expires_at']}")
+```
 
 ---
 
-#### 7. **Checking Claim Status**
+#### 7. **Policy Renewal** (NEW!)
+```python
+# Problem: Policy expires in 24 hours, need more time
+# Solution: Use /renew endpoint to extend coverage
+
+from x402 import X402Client
+
+# Renew before expiration
+response = x402.post('/renew', json={
+    'policy_id': 'uuid',
+    'extend_hours': 24  # Extend by 24 hours (1-168 hours allowed)
+})
+
+# Response: 200 OK
+# {
+#   "policy_id": "uuid",
+#   "old_expires_at": "2025-11-08T10:00:00Z",
+#   "new_expires_at": "2025-11-09T10:00:00Z",
+#   "extension_hours": 24,
+#   "renewal_fee": 0.0001,  # Pro-rated: 24h = full premium
+#   "renewal_count": 1,
+#   "status": "active"
+# }
+
+# Auto-renewal example
+def auto_renew_policies(agent_wallet):
+    """Automatically renew policies before they expire"""
+    policies = requests.get(f'/policies?wallet={agent_wallet.address}').json()
+
+    for policy in policies['active_policies']:
+        expires_at = datetime.fromisoformat(policy['expires_at'].replace('Z', '+00:00'))
+        time_remaining = expires_at - datetime.now(timezone.utc)
+
+        # Renew if less than 1 hour remaining
+        if time_remaining < timedelta(hours=1):
+            try:
+                renewal = x402.post('/renew', json={
+                    'policy_id': policy['policy_id'],
+                    'extend_hours': 24
+                })
+                print(f"✅ Auto-renewed: {policy['policy_id']}")
+            except Exception as e:
+                print(f"⚠️  Renewal failed: {e}")
+```
+
+**Renewal Fees (Pro-rated):**
+- 24 hours extension = 1 × premium (same as initial)
+- 12 hours extension = 0.5 × premium
+- 48 hours extension = 2 × premium
+- Max extension: 168 hours (7 days) from current time
+
+**Benefits:**
+- No coverage gaps
+- Keep same policy_id (no need to track new policy)
+- Flexible duration (1-168 hours)
+
+---
+
+#### 8. **Checking Claim Status**
 ```python
 # Problem: Want to know if claim is being processed
 # After submitting claim:
