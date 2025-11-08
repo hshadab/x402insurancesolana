@@ -135,6 +135,29 @@ reserve_monitor = ReserveMonitor(
     min_reserve_ratio=config.MIN_RESERVE_RATIO
 )
 
+# Custom rate limit error handler for better agent experience
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    """
+    Custom handler for rate limit errors (429 Too Many Requests).
+    Provides clear guidance for agents on retry strategy.
+    """
+    return jsonify({
+        "error": "Rate limit exceeded",
+        "message": str(e.description),
+        "retry_strategy": {
+            "recommendation": "Implement exponential backoff",
+            "example_delays": [1, 2, 4, 8, 16],
+            "example_delays_unit": "seconds"
+        },
+        "rate_limits": {
+            "/insure": "10 per hour",
+            "/claim": "5 per hour",
+            "general": "200 per day, 50 per hour"
+        },
+        "documentation": "See /.well-known/agent-card.json for complete rate limit information"
+    }), 429
+
 # Configuration summary
 PREMIUM_PERCENTAGE = config.PREMIUM_PERCENTAGE
 MAX_COVERAGE = config.MAX_COVERAGE_USDC
@@ -668,6 +691,44 @@ def agent_card():
                 "zkp_generation_time_ms": "10000-20000",
                 "refund_time_ms": "2000-5000",
                 "total_claim_time_ms": "15000-30000"
+            },
+            "rate_limits": {
+                "/insure": {
+                    "limit": "10 per hour",
+                    "limit_per_minute": None,
+                    "recommendation": "Implement exponential backoff if you receive 429 responses"
+                },
+                "/claim": {
+                    "limit": "5 per hour",
+                    "limit_per_minute": None,
+                    "recommendation": "Implement exponential backoff if you receive 429 responses"
+                },
+                "general": {
+                    "limit": "200 per day, 50 per hour",
+                    "recommendation": "Cache discovery endpoints (agent-card, pricing, schema) to reduce request volume"
+                }
+            },
+            "agent_guidance": {
+                "timeout_recommendations": {
+                    "/insure": "5-10 seconds (simple x402 payment verification)",
+                    "/claim": "30-45 seconds (includes zkp generation which takes 10-20s)",
+                    "/verify": "5-10 seconds (proof verification)"
+                },
+                "memory_solution": {
+                    "endpoint": "/policies?wallet=0xYourAddress",
+                    "description": "Retrieve active policies by wallet address. Solves agent context window memory loss.",
+                    "use_case": "If you forget your policy_id after context reset, query by wallet address"
+                },
+                "policy_expiration": {
+                    "duration": "24 hours",
+                    "grace_period": None,
+                    "recommendation": "Monitor policy expiration and file claims before 24-hour window closes"
+                },
+                "error_handling": {
+                    "429_rate_limit": "Implement exponential backoff (1s, 2s, 4s, 8s...)",
+                    "402_payment_required": "First request returns 402 with payment details. Sign payment and retry.",
+                    "503_service_unavailable": "Retry with exponential backoff, check /health endpoint"
+                }
             }
         },
         "links": {
@@ -881,6 +942,9 @@ def claim():
     """
     Submit fraud claim
 
+    Headers (optional):
+      Idempotency-Key: string (prevents duplicate claims if retried)
+
     Body:
       {
         "policy_id": "uuid",
@@ -909,6 +973,27 @@ def claim():
 
     if not policy_id or not http_response:
         return jsonify({"error": "Missing policy_id or http_response"}), 400
+
+    # Idempotency check: Allow agents to safely retry claim requests
+    idempotency_key = request.headers.get('Idempotency-Key')
+    if idempotency_key:
+        # Check if claim with this idempotency key already exists
+        claims = load_data(CLAIMS_FILE)
+        for claim_id, existing_claim in claims.items():
+            if existing_claim.get('idempotency_key') == idempotency_key:
+                # Return existing claim (idempotent response)
+                return jsonify({
+                    "claim_id": existing_claim["claim_id"],
+                    "policy_id": existing_claim["policy_id"],
+                    "proof": existing_claim["proof"],
+                    "public_inputs": existing_claim["public_inputs"],
+                    "payout_amount": existing_claim["payout_amount"],
+                    "refund_tx_hash": existing_claim["refund_tx_hash"],
+                    "status": existing_claim["status"],
+                    "proof_url": f"/proofs/{existing_claim['claim_id']}",
+                    "idempotent": True,
+                    "note": "This claim was already processed (idempotent response)"
+                }), 200
 
     # Load policy
     policies = load_data(POLICIES_FILE)
@@ -988,7 +1073,8 @@ def claim():
         "recipient_address": policy["agent_address"],
         "status": "paid",
         "created_at": iso_utc_now(),
-        "paid_at": iso_utc_now()
+        "paid_at": iso_utc_now(),
+        "idempotency_key": idempotency_key  # Store for future idempotent requests
     }
 
     # Save claim
@@ -1010,6 +1096,46 @@ def claim():
         "status": "paid",
         "proof_url": f"/proofs/{claim_id}"
     }), 201
+
+
+@app.route('/claims/<claim_id>', methods=['GET'])
+def get_claim_status(claim_id):
+    """
+    Get claim processing status (for polling)
+
+    Allows agents to check claim status without downloading full proof data.
+    Useful for polling during async proof generation (future enhancement).
+
+    Returns:
+      {
+        "claim_id": "uuid",
+        "policy_id": "uuid",
+        "status": "paid|processing|failed",
+        "payout_amount": 0.01,
+        "refund_tx_hash": "0x...",
+        "proof_url": "/proofs/uuid",
+        "created_at": "2025-11-08T10:00:00Z",
+        "paid_at": "2025-11-08T10:00:15Z"
+      }
+    """
+    claims = load_data(CLAIMS_FILE)
+    claim = claims.get(claim_id)
+
+    if not claim:
+        return jsonify({"error": "Claim not found"}), 404
+
+    # Return lightweight status info (no full proof data)
+    return jsonify({
+        "claim_id": claim["claim_id"],
+        "policy_id": claim["policy_id"],
+        "status": claim.get("status", "unknown"),
+        "payout_amount": claim.get("payout_amount"),
+        "refund_tx_hash": claim.get("refund_tx_hash"),
+        "proof_url": f"/proofs/{claim_id}",
+        "created_at": claim.get("created_at"),
+        "paid_at": claim.get("paid_at"),
+        "proof_generation_time_ms": claim.get("proof_generation_time_ms")
+    }), 200
 
 
 @app.route('/verify', methods=['POST'])

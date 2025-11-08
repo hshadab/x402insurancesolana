@@ -2,6 +2,22 @@
 
 This document describes how autonomous agents can discover and interact with the x402 Insurance service.
 
+## 🚀 Quick Start for Agents
+
+**Key Features for Agents:**
+1. **Memory Solution**: Use `GET /policies?wallet=0xYourAddress` to recover policy_id after context resets
+2. **Idempotency**: Add `Idempotency-Key` header to `/claim` requests to safely retry
+3. **Claim Status**: Poll `GET /claims/{claim_id}` to check claim progress
+4. **Rate Limits**: See agent card metadata for limits (10/hour for /insure, 5/hour for /claim)
+5. **Timeout Guidance**: Use 30-45s timeout for `/claim` (includes 10-20s zkp generation)
+
+**Critical Endpoints:**
+- `/.well-known/agent-card.json` - Complete service discovery (includes rate limits, timeouts, error handling)
+- `/policies?wallet=0x...` - **Retrieve your policies by wallet address** (solves memory problem!)
+- `/claims/{claim_id}` - Check claim status
+- `/insure` - Purchase policy (x402 payment required)
+- `/claim` - File fraud claim (with idempotency support)
+
 ## Discovery Endpoints
 
 ### 1. **Agent Card** (A2A Protocol)
@@ -543,6 +559,256 @@ async def check_health():
             return False
         return True
 ```
+
+---
+
+## Error Handling & Recovery Strategies
+
+### Common Errors and How to Handle Them
+
+#### 1. **429 Rate Limit Exceeded**
+```python
+# Problem: Too many requests
+response = requests.post('/insure', ...)
+# Response: 429 Too Many Requests
+# {
+#   "error": "Rate limit exceeded",
+#   "retry_strategy": {
+#     "recommendation": "Implement exponential backoff",
+#     "example_delays": [1, 2, 4, 8, 16]
+#   }
+# }
+
+# Solution: Exponential backoff with retry
+import time
+
+def call_with_backoff(func, max_retries=5):
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except RateLimitError as e:
+            if attempt < max_retries - 1:
+                delay = 2 ** attempt  # 1s, 2s, 4s, 8s, 16s
+                time.sleep(delay)
+                continue
+            raise
+```
+
+**Rate Limits:**
+- `/insure`: 10 per hour
+- `/claim`: 5 per hour
+- General: 200 per day, 50 per hour
+
+**Best Practice:** Cache discovery endpoints (agent-card, pricing, schema) to conserve requests.
+
+---
+
+#### 2. **402 Payment Required**
+```python
+# Problem: First request without payment
+response = requests.post('/insure', json=data)
+# Response: 402 Payment Required
+# {
+#   "x402Version": 1,
+#   "payment": {
+#     "scheme": "exact",
+#     "network": "base",
+#     "amount": "100",
+#     "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+#     "pay_to": "0xba72eD...",
+#     "maxTimeoutSeconds": 60
+#   }
+# }
+
+# Solution: Sign payment and retry
+from x402 import sign_payment
+
+payment_header = sign_payment(
+    amount=response.json()['payment']['amount'],
+    asset=response.json()['payment']['asset'],
+    pay_to=response.json()['payment']['pay_to'],
+    wallet=agent_wallet
+)
+
+# Retry with payment header
+response = requests.post('/insure',
+    headers={'X-Payment': payment_header, 'X-Payer': agent_wallet.address},
+    json=data
+)
+# Response: 201 Created (policy created!)
+```
+
+---
+
+#### 3. **Policy Not Found / Forgotten policy_id**
+```python
+# Problem: Agent context reset, policy_id lost
+# ❌ BAD: Try to remember policy_id in memory
+policy_id = agent.memory.get('policy_id')  # Returns None after context reset!
+
+# ✅ GOOD: Query by wallet address
+policies_response = requests.get(f'/policies?wallet={agent.wallet.address}')
+policies = policies_response.json()['active_policies']
+
+# Find policy for failed merchant
+failed_merchant = "https://api.example.com"
+policy = next(p for p in policies if p['merchant_url'] == failed_merchant)
+policy_id = policy['policy_id']
+
+# Now file claim
+claim_response = requests.post('/claim', json={
+    'policy_id': policy_id,
+    'http_response': {...}
+})
+```
+
+**Why This Works:**
+- Agents always know their wallet address (it's fundamental to identity)
+- No need to persist policy_id across context resets
+- `/policies` endpoint is stateless and always available
+
+---
+
+#### 4. **Claim Timeout / Proof Generation Failure**
+```python
+# Problem: zkp generation takes 10-20 seconds, request times out
+import httpx
+
+# ❌ BAD: Default timeout (5s)
+response = httpx.post('/claim', json=claim_data)  # Times out!
+
+# ✅ GOOD: Use appropriate timeout
+response = httpx.post('/claim',
+    json=claim_data,
+    timeout=45.0  # 30-45 seconds recommended
+)
+
+# OR: Use idempotency for safe retry
+import uuid
+idempotency_key = str(uuid.uuid4())
+
+try:
+    response = httpx.post('/claim',
+        headers={'Idempotency-Key': idempotency_key},
+        json=claim_data,
+        timeout=45.0
+    )
+except httpx.TimeoutException:
+    # Safe to retry with same idempotency key
+    response = httpx.post('/claim',
+        headers={'Idempotency-Key': idempotency_key},
+        json=claim_data,
+        timeout=45.0
+    )
+    # Will return existing claim if first request succeeded
+```
+
+**Recommended Timeouts:**
+- `/insure`: 5-10 seconds
+- `/claim`: 30-45 seconds (includes zkp generation)
+- `/verify`: 5-10 seconds
+
+---
+
+#### 5. **Duplicate Claim Prevention**
+```python
+# Problem: Network error during claim submission, agent retries
+# ❌ RISKY: Retry without idempotency key
+response1 = requests.post('/claim', json=claim_data)  # Network error
+response2 = requests.post('/claim', json=claim_data)  # Creates duplicate claim!
+
+# ✅ SAFE: Use idempotency key
+import hashlib
+
+# Generate deterministic idempotency key based on claim data
+claim_hash = hashlib.sha256(
+    f"{policy_id}:{http_status}:{http_body_hash}".encode()
+).hexdigest()
+
+response = requests.post('/claim',
+    headers={'Idempotency-Key': claim_hash},
+    json=claim_data
+)
+# If claim already exists, returns existing claim with status 200
+# If new claim, processes and returns with status 201
+```
+
+---
+
+#### 6. **Policy Expired**
+```python
+# Problem: Trying to file claim after 24-hour window
+response = requests.post('/claim', json={'policy_id': old_policy_id, ...})
+# Response: 400 Bad Request
+# {"error": "Policy expired"}
+
+# Solution: Monitor policy expiration proactively
+from datetime import datetime, timedelta
+
+def monitor_policies(agent_wallet):
+    policies = requests.get(f'/policies?wallet={agent_wallet.address}').json()
+
+    for policy in policies['active_policies']:
+        expires_at = datetime.fromisoformat(policy['expires_at'].replace('Z', '+00:00'))
+        time_remaining = expires_at - datetime.now()
+
+        if time_remaining < timedelta(hours=1):
+            print(f"⚠️  Policy {policy['policy_id']} expires in {time_remaining}!")
+            # File claim ASAP if merchant has failed
+```
+
+**Policy Duration:** 24 hours from creation
+**Grace Period:** None
+**Recommendation:** File claims within 23 hours of policy creation
+
+---
+
+#### 7. **Checking Claim Status**
+```python
+# Problem: Want to know if claim is being processed
+# After submitting claim:
+claim_response = requests.post('/claim', json=claim_data)
+claim_id = claim_response.json()['claim_id']
+
+# Poll for status (useful for async workflows)
+import time
+
+def wait_for_claim(claim_id, timeout=60):
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        status = requests.get(f'/claims/{claim_id}').json()
+
+        if status['status'] == 'paid':
+            print(f"✅ Claim paid! TX: {status['refund_tx_hash']}")
+            return status
+        elif status['status'] == 'failed':
+            print(f"❌ Claim failed!")
+            return status
+
+        time.sleep(2)  # Poll every 2 seconds
+
+    raise TimeoutError("Claim processing timed out")
+
+# Use for monitoring
+try:
+    final_status = wait_for_claim(claim_id)
+    print(f"Received {final_status['payout_amount']} USDC")
+except TimeoutError:
+    print("Claim taking longer than expected, check /claims/{claim_id} later")
+```
+
+---
+
+### Error Response Reference
+
+| Status Code | Error | Meaning | Recovery Strategy |
+|-------------|-------|---------|-------------------|
+| 400 | Bad Request | Invalid input data | Check inputSchema, validate request |
+| 402 | Payment Required | x402 payment needed | Sign payment and retry with X-Payment header |
+| 404 | Not Found | Policy/claim doesn't exist | Use /policies to find correct policy_id |
+| 429 | Rate Limit | Too many requests | Exponential backoff (1s, 2s, 4s, 8s...) |
+| 500 | Server Error | Internal service error | Retry with backoff, check /health endpoint |
+| 503 | Service Unavailable | Service temporarily down | Check /health, wait and retry |
 
 ---
 
