@@ -4,7 +4,7 @@ Blockchain service - USDC refunds on Base
 from web3 import Web3
 import os
 
-# ERC20 ABI (minimal - just transfer)
+# ERC20 ABI (minimal - transfer and balanceOf)
 ERC20_ABI = [
     {
         "constant": False,
@@ -14,6 +14,13 @@ ERC20_ABI = [
         ],
         "name": "transfer",
         "outputs": [{"name": "", "type": "bool"}],
+        "type": "function"
+    },
+    {
+        "constant": True,
+        "inputs": [{"name": "_owner", "type": "address"}],
+        "name": "balanceOf",
+        "outputs": [{"name": "balance", "type": "uint256"}],
         "type": "function"
     }
 ]
