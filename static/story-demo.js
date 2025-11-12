@@ -56,7 +56,7 @@ const STORY_SCENES = [
     },
     {
         name: "disaster-strikes",
-        duration: 12000,
+        duration: 14000,
         overlay: {
             title: "API Outage Detected",
             subtitle: "NovaNet zkEngine generates cryptographic proof",
@@ -64,12 +64,13 @@ const STORY_SCENES = [
         },
         scroll: { target: "#recentClaims", behavior: "smooth", offset: -50 },
         callouts: [
-            { element: "#recentClaims", text: "NovaNet ZK Proof Generated", position: "left", style: "tech", delay: 2000 },
-            { element: "#usdcReserve", text: "Instant USDC Refund (400ms)", position: "right", style: "success", delay: 4000 }
+            { element: "#recentClaims", text: "🔮 Solana: Proof Attested On-Chain", position: "left", style: "tech", delay: 2000 },
+            { element: "#usdcReserve", text: "💸 Solana: USDC Refund (400ms)", position: "right", style: "success", delay: 5000 },
+            { element: "#solanaActivity", text: "📥 Solana: x402 Premium Payment", position: "top", style: "success", delay: 8000 }
         ],
         actions: [
             { type: "start-demo", delay: 0 },
-            { type: "highlight", target: "#solanaActivity", delay: 6000 }
+            { type: "highlight", target: "#solanaActivity", delay: 9000 }
         ]
     },
     {
@@ -94,17 +95,17 @@ const STORY_SCENES = [
         name: "tech-stack",
         duration: 10000,
         overlay: {
-            title: "The Technology",
+            title: "3 Ways Solana Powers x402",
             bullets: [
-                "NovaNet zkEngine - Cryptographic failure proofs",
-                "Solana - Instant settlement (400ms)",
-                "USDC - Stable payouts"
+                "📥 Premium Payments (x402 protocol)",
+                "🔮 Proof Attestation (Memo Program)",
+                "💸 USDC Refunds (SPL Token, 400ms)"
             ],
             style: "tech"
         },
         scroll: { target: "#solanaActivity", behavior: "smooth", offset: -50 },
         callouts: [
-            { element: "#solanaActivity", text: "Watch real transactions", position: "top", style: "highlight" }
+            { element: "#solanaActivity", text: "All 3 transaction types on-chain", position: "top", style: "highlight" }
         ],
         actions: [
             { type: "pulse", target: "#solanaActivity", delay: 2000 }
