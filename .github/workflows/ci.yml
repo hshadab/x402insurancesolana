@@ -47,11 +47,17 @@ jobs:
         continue-on-error: true
 
       - name: Syntax check (import all modules)
+        env:
+          ENV: development
+          BLOCKCHAIN_NETWORK: solana
+          SOLANA_CLUSTER: devnet
+          SOLANA_RPC_URL: https://api.devnet.solana.com
+          USDC_MINT_ADDRESS: 4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU
+          DATABASE_TYPE: json
         run: |
           python -c "
           import sys
           import os
-          os.environ['ENV'] = 'development'
           try:
               from payment_verifier_solana import PaymentVerifierSolana, SimplePaymentVerifierSolana
               from database import DatabaseClient
@@ -63,10 +69,19 @@ jobs:
               sys.exit(0)
           except Exception as e:
               print(f'❌ Import failed: {e}')
+              import traceback
+              traceback.print_exc()
               sys.exit(1)
           "
 
       - name: Run unit tests
+        env:
+          ENV: development
+          BLOCKCHAIN_NETWORK: solana
+          SOLANA_CLUSTER: devnet
+          SOLANA_RPC_URL: https://api.devnet.solana.com
+          USDC_MINT_ADDRESS: 4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU
+          DATABASE_TYPE: json
         run: |
           pytest tests/unit/ -v --cov=. --cov-report=xml --cov-report=term
 
