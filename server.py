@@ -1546,24 +1546,42 @@ def verify():
     """
     PUBLIC ENDPOINT: Verify zkEngine proof
 
-    Body:
+    Body (option 1 - direct proof):
       {
         "proof": "0xabc...",
         "public_inputs": [1, 503, 0, 10000]
       }
 
+    Body (option 2 - by claim_id):
+      {
+        "claim_id": "abc-123-..."
+      }
+
     Returns:
       {
         "valid": true,
+        "claim_id": "abc-123-...",  # if claim_id provided
         "failure_detected": true,
         "payout_amount": 10000
       }
     """
     data = request.json
+    claim_id = data.get('claim_id')
     proof = data.get('proof')
     public_inputs = data.get('public_inputs')
 
-    if not proof or not public_inputs:
+    # If claim_id provided, look up the claim
+    if claim_id:
+        claim = database.get_claim(claim_id)
+        if not claim:
+            return jsonify({"error": "Claim not found"}), 404
+
+        proof = claim.get('proof')
+        public_inputs = claim.get('public_inputs')
+
+        if not proof or not public_inputs:
+            return jsonify({"error": "Claim has no proof data"}), 400
+    elif not proof or not public_inputs:
         return jsonify({"error": "Missing proof or public_inputs"}), 400
 
     try:
@@ -1572,12 +1590,17 @@ def verify():
         failure_detected = public_inputs[0] == 1 if len(public_inputs) > 0 else False
         payout_amount = public_inputs[3] if len(public_inputs) > 3 else 0
 
-        return jsonify({
+        result = {
             "valid": is_valid,
             "public_inputs": public_inputs,
             "failure_detected": failure_detected,
             "payout_amount": payout_amount
-        })
+        }
+
+        if claim_id:
+            result["claim_id"] = claim_id
+
+        return jsonify(result)
 
     except Exception as e:
         return jsonify({

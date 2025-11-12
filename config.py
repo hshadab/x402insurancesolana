@@ -85,8 +85,8 @@ class DevelopmentConfig(Config):
     # Use testnet by default
     BASE_RPC_URL = os.getenv("BASE_RPC_URL", "https://sepolia.base.org")
 
-    # Simple payment verification for easier testing
-    PAYMENT_VERIFICATION_MODE = "simple"
+    # Payment verification mode can be overridden via environment variable
+    # PAYMENT_VERIFICATION_MODE = "simple"  # Commented out - use env var instead
 
 
 class ProductionConfig(Config):
