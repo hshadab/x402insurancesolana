@@ -980,6 +980,13 @@ def detect_failure(http_status, body_length):
             // Recent claims
             const claimsDiv = document.getElementById('recentClaims');
             if (data.recent_claims && data.recent_claims.length > 0) {
+                // Save which verification sections are currently expanded
+                const expandedClaims = new Set();
+                document.querySelectorAll('.verification-section.expanded').forEach(section => {
+                    const claimId = section.id.replace('verification-', '');
+                    expandedClaims.add(claimId);
+                });
+
                 claimsDiv.innerHTML = data.recent_claims.map((claim, index) => {
                     const claimId = claim.id || claim.claim_id;
                     const shortClaimId = claimId.substring(0, 8);
@@ -1095,6 +1102,24 @@ def detect_failure(http_status, body_length):
                     </div>
                 `;
                 }).join('');
+
+                // Restore expanded state after DOM update
+                setTimeout(() => {
+                    expandedClaims.forEach(claimId => {
+                        const section = document.getElementById(`verification-${claimId}`);
+                        const button = document.querySelector(`button[onclick*="toggleVerification('${claimId}'"]`);
+                        if (section && button) {
+                            section.classList.add('expanded');
+                            button.classList.add('expanded');
+                            button.innerHTML = `
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="9 18 15 12 9 6"></polyline>
+                                </svg>
+                                Hide Verification Data
+                            `;
+                        }
+                    });
+                }, 0);
             }
 
             // Populate Solana Activity from recent transactions
