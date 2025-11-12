@@ -12,6 +12,7 @@ from solana.rpc.api import Client
 from solana.rpc.commitment import Confirmed
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
+from solders.signature import Signature
 from solders.transaction import Transaction
 from solders.instruction import Instruction
 from solders.system_program import TransferParams, transfer
@@ -266,8 +267,9 @@ class BlockchainClientSolana:
             recent_blockhash
         )
 
-        # Send transaction (already signed)
-        tx_resp = self.client.send_transaction(transaction)
+        # Send transaction as raw bytes (already signed)
+        serialized_tx = bytes(transaction)
+        tx_resp = self.client.send_raw_transaction(serialized_tx)
 
         tx_sig = str(tx_resp.value)
         self.logger.info(f"Transaction sent: {tx_sig}")
@@ -364,20 +366,17 @@ class BlockchainClientSolana:
                 # Get fresh blockhash for each attempt
                 recent_blockhash = self.client.get_latest_blockhash().value.blockhash
 
-                # Add compute budget instructions
-                compute_price_ix = set_compute_unit_price(1000)
-                compute_limit_ix = set_compute_unit_limit(10_000)
-
-                # Build and sign transaction
+                # Build and sign transaction (no compute budget needed for memo)
                 tx = Transaction.new_signed_with_payer(
-                    [compute_price_ix, compute_limit_ix, memo_ix],
+                    [memo_ix],
                     self.pubkey,
                     [self.keypair],
                     recent_blockhash
                 )
 
-                # Send the signed transaction (blockhash already embedded in tx)
-                result = self.client.send_transaction(tx)
+                # Serialize the signed transaction and send as raw
+                serialized_tx = bytes(tx)
+                result = self.client.send_raw_transaction(serialized_tx)
 
                 tx_sig = str(result.value)
                 self.logger.info(f"Proof attestation transaction sent: {tx_sig}")
@@ -387,14 +386,23 @@ class BlockchainClientSolana:
                 start_time = time.time()
 
                 while time.time() - start_time < max_wait:
-                    status = self.client.get_signature_statuses([tx_sig]).value[0]
+                    # Convert string signature to Signature object for API call
+                    tx_sig_obj = Signature.from_string(tx_sig)
+                    status = self.client.get_signature_statuses([tx_sig_obj]).value[0]
 
                     if status is not None:
-                        if status.confirmation_status in ["confirmed", "finalized"]:
-                            self.logger.info(f"Proof attestation confirmed: {tx_sig}")
-                            self.logger.info(f"View on explorer: {self.get_transaction_url(tx_sig)}")
-                            return tx_sig
-                        elif status.err:
+                        # Get confirmation status (it's an enum object, need to convert to string)
+                        conf_status = status.confirmation_status
+                        if conf_status:
+                            # Convert enum to lowercase string for comparison
+                            conf_status_str = str(conf_status).split('.')[-1].lower()
+
+                            if conf_status_str in ["confirmed", "finalized"]:
+                                self.logger.info(f"Proof attestation {conf_status_str}: {tx_sig}")
+                                self.logger.info(f"View on explorer: {self.get_transaction_url(tx_sig)}")
+                                return tx_sig
+
+                        if status.err:
                             raise Exception(f"Transaction failed: {status.err}")
 
                     time.sleep(0.5)
@@ -403,7 +411,9 @@ class BlockchainClientSolana:
                 self.logger.warning(f"Proof attestation not confirmed after {max_wait}s, retrying...")
 
             except Exception as e:
+                import traceback
                 self.logger.error(f"Proof attestation attempt {attempt + 1} failed: {e}")
+                self.logger.error(f"Traceback:\n{traceback.format_exc()}")
                 if attempt < self.max_retries - 1:
                     time.sleep(2 ** attempt)
                 else:
