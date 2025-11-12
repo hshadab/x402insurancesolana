@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
-End-to-End Test for x402 Insurance
+Manual E2E test script for x402 Insurance
 Tests the complete flow: buy policy -> submit claim -> verify proof
+
+This is NOT a pytest test - it's a standalone script for manual testing.
+Requires the server to be running on localhost:8000
+
+Run with: python tests/manual_e2e_test.py
 """
 import httpx
 import time

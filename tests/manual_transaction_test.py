@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Test transaction building"""
+"""
+Manual test script for Solana transaction building
+
+This is NOT a pytest test - it's a standalone script for manual testing.
+Run directly with: python tests/manual_transaction_test.py
+"""
 from solders.transaction import Transaction
 from solders.keypair import Keypair
 from solders.compute_budget import set_compute_unit_price, set_compute_unit_limit
