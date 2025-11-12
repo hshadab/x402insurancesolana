@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+  # x402 Insurance API
+  x402-insurance:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: x402-insurance
+    ports:
+      - "8000:8000"
+    environment:
+      # Application
+      - ENV=development
+      - DEBUG=true
+      - LOG_LEVEL=INFO
+      - PORT=8000
+      - HOST=0.0.0.0
+
+      # Blockchain - Solana Devnet
+      - BLOCKCHAIN_NETWORK=solana
+      - SOLANA_CLUSTER=devnet
+      - SOLANA_RPC_URL=https://api.devnet.solana.com
+      - USDC_MINT_ADDRESS=4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU
+
+      # Backend Wallet (mount your keypair as volume)
+      - WALLET_KEYPAIR_PATH=/app/solana-wallet.json
+      - BACKEND_WALLET_PUBKEY=${BACKEND_WALLET_PUBKEY}
+
+      # Database
+      - DATABASE_TYPE=json
+
+      # Insurance
+      - PREMIUM_PERCENTAGE=0.01
+      - MAX_COVERAGE_USDC=0.1
+      - POLICY_DURATION_HOURS=24
+
+      # Payment verification
+      - PAYMENT_VERIFICATION_MODE=simple
+      - PAYMENT_MAX_AGE_SECONDS=300
+
+      # zkEngine
+      - ZKENGINE_BINARY_PATH=/app/zkengine/fraud_detector
+
+      # Rate limiting
+      - RATE_LIMIT_ENABLED=true
+
+      # Security
+      - CORS_ORIGINS=*
+
+    volumes:
+      # Mount your Solana keypair (update path to your local keypair)
+      - ${WALLET_KEYPAIR_PATH:-./solana-wallet.json}:/app/solana-wallet.json:ro
+      # Mount data directory for persistent storage
+      - ./data:/app/data
+      # Mount zkengine binary
+      - ./zkengine:/app/zkengine:ro
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    restart: unless-stopped
+
+    networks:
+      - x402-network
+
+  # Optional: PostgreSQL for production-like environment
+  # Uncomment to use PostgreSQL instead of JSON files
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: x402-postgres
+  #   environment:
+  #     - POSTGRES_USER=x402
+  #     - POSTGRES_PASSWORD=x402password
+  #     - POSTGRES_DB=x402insurance
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres-data:/var/lib/postgresql/data
+  #   networks:
+  #     - x402-network
+
+  # Optional: Redis for distributed rate limiting
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: x402-redis
+  #   ports:
+  #     - "6379:6379"
+  #   networks:
+  #     - x402-network
+
+networks:
+  x402-network:
+    driver: bridge
+
+# volumes:
+#   postgres-data:

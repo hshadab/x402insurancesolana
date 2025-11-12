@@ -1,15 +1,15 @@
 # Deployment Guide - Render
 
-This guide explains how to deploy the x402 Insurance Service to Render.
+This guide explains how to deploy the x402 Insurance Service on Solana to Render.
 
 ## Prerequisites
 
 1. A Render account (sign up at https://render.com)
 2. Your code in a Git repository (GitHub, GitLab, or Bitbucket)
-3. Base Mainnet wallet with:
-   - Private key
-   - Wallet address
-   - Some ETH for gas fees (~0.005 ETH recommended)
+3. Solana wallet with:
+   - Keypair JSON file (generated with `solana-keygen new`)
+   - Wallet address (public key)
+   - SOL for transaction fees (~0.1 SOL recommended for devnet, 0.5+ SOL for mainnet)
    - USDC for refunds (amount depends on expected coverage)
 
 ## Deployment Steps
@@ -46,16 +46,29 @@ In the Render dashboard, go to "Environment" and add these SECRET variables:
 
 **CRITICAL - Keep These Secret:**
 ```
-BACKEND_WALLET_PRIVATE_KEY=0xYOUR_PRIVATE_KEY_HERE
-BACKEND_WALLET_ADDRESS=0xYOUR_WALLET_ADDRESS_HERE
-BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_KEY
+# Solana Configuration
+SOLANA_CLUSTER=mainnet-beta  # or devnet for testing
+SOLANA_RPC_URL=https://api.mainnet-beta.solana.com  # or https://api.devnet.solana.com
+USDC_MINT_ADDRESS=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v  # Mainnet USDC
+BACKEND_WALLET_PUBKEY=YOUR_SOLANA_PUBLIC_KEY_HERE
+WALLET_KEYPAIR_PATH=/etc/secrets/solana-wallet.json  # Path to your keypair on Render
+
+# Blockchain Network
+BLOCKCHAIN_NETWORK=solana
 ```
+
+**How to Upload Keypair to Render:**
+1. Copy your Solana keypair JSON content (from `~/solana-wallet.json`)
+2. In Render dashboard, go to "Environment" → "Secret Files"
+3. Create new secret file: Filename: `solana-wallet.json`, Content: paste your keypair JSON
+4. Render will mount it at `/etc/secrets/solana-wallet.json`
 
 **Optional:**
 ```
 PREMIUM_PERCENTAGE=0.01
 MAX_COVERAGE_USDC=0.1
 POLICY_DURATION_HOURS=24
+PAYMENT_VERIFICATION_MODE=full  # or "simple" for development
 ```
 
 ### 4. Deploy

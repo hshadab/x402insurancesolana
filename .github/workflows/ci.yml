@@ -53,9 +53,10 @@ jobs:
           import os
           os.environ['ENV'] = 'development'
           try:
-              from auth.payment_verifier import PaymentVerifier, SimplePaymentVerifier
+              from payment_verifier_solana import PaymentVerifierSolana, SimplePaymentVerifierSolana
               from database import DatabaseClient
-              from blockchain import BlockchainClient
+              from blockchain_solana import BlockchainClientSolana
+              from zkengine_client import ZKEngineClient
               from config import get_config
               from tasks.reserve_monitor import ReserveMonitor
               print('✅ All modules imported successfully')
@@ -68,9 +69,6 @@ jobs:
       - name: Run unit tests
         run: |
           pytest tests/unit/ -v --cov=. --cov-report=xml --cov-report=term
-        continue-on-error: true
-        # Note: Tests currently have dependency conflicts with eth_typing
-        # This is a known issue and doesn't affect production functionality
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3

@@ -48,10 +48,8 @@ from typing import Tuple, List, Optional
 load_dotenv()
 
 from zkengine_client import ZKEngineClient
-from blockchain import BlockchainClient
 from blockchain_solana import BlockchainClientSolana
 from database import DatabaseClient
-from auth.payment_verifier import PaymentVerifier, SimplePaymentVerifier
 from payment_verifier_solana import PaymentVerifierSolana, SimplePaymentVerifierSolana
 from tasks.reserve_monitor import ReserveMonitor
 from config import get_config

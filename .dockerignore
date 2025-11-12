@@ -1,0 +1,90 @@
+# Git
+.git
+.gitignore
+.github
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# Environment variables (security)
+.env
+.env.local
+.env.*.local
+*.env.backup
+
+# Data files
+data/
+*.db
+*.sqlite
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+test_*.txt
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Secrets (NEVER include in Docker image)
+*.pem
+*.key
+*.p12
+*.pfx
+*_rsa
+*_dsa
+*_ecdsa
+*_ed25519
+credentials.json
+secrets.json
+private_key*
+wallet_key*
+solana-wallet.json
+*-wallet.json
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# CI/CD
+.github/
+.renderignore
+
+# Archives
+docs/archive/
+
+# Render
+render.yaml
+
+# Tests
+tests/
