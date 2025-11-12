@@ -7,13 +7,10 @@ flask-cors==4.0.0
 flask-limiter==3.5.0
 gunicorn==21.2.0
 
-# Solana SDK
+# Solana SDK (includes spl.token for USDC transfers)
 solana==0.32.0
 solders>=0.20.0,<0.21.0
 anchorpy==0.19.1
-
-# SPL Token (for USDC transfers)
-spl-token==0.2.0
 
 # Cryptography (Solana ed25519)
 PyNaCl==1.5.0
