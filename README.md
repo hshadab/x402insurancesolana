@@ -7,13 +7,21 @@ cryptographically-verified refunds on **Solana blockchain**.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![x402 Protocol](https://img.shields.io/badge/x402-Compatible-blue)](https://github.com/coinbase/x402)
-[![Solana](https://img.shields.io/badge/Solana-Devnet%20%7C%20Mainnet-14F195)](https://solana.com)
+[![Solana](https://img.shields.io/badge/Solana-Devnet%20%7C%20Mainnet-14F195)](https://docs.solana.com)
 
 ## Status
 
-🟢 Production Ready | 🤖 Agent Discoverable | 🚀 v2.2.0 (Solana)
-**Agent Readiness: 9.0/10**
-Date: 2025-11-11
+🟢 Production Ready | 🤖 Agent Discoverable | 🚀 v2.3.0 (Solana)
+**Agent Readiness: 9.5/10**
+Date: 2025-11-12
+
+**Latest Updates:**
+- ✅ **Signature Type Conversion Fixed** - USDC refund confirmation now works correctly
+- ✅ **End-to-End Claims Flow Tested** - Both proof attestation and refunds confirmed on Solana devnet
+- ✅ **Dashboard Integration Complete** - Solana Activity section displays real transactions
+- 🔗 **Example Transactions:**
+  - Proof Attestation: [3VHxfgSHRsokqTRQxBiS8LX9WWYPs8M1ofRLHmXzpmuC...](https://explorer.solana.com/tx/3VHxfgSHRsokqTRQxBiS8LX9WWYPs8M1ofRLHmXzpmuCqMYXr7D67Guz3KyFqAQ29hoSjXB5mewSKw3Ui1agzVH2?cluster=devnet)
+  - USDC Refund: [3RzvPFfCVpzaHRUWnoeFbxKfPTy7cSZCeYFJWiYvviTv...](https://explorer.solana.com/tx/3RzvPFfCVpzaHRUWnoeFbxKfPTy7cSZCeYFJWiYvviTvtbvE8Uexqa6ycnAYJTTdxTpEeSNKZn8hGPfktUxvJQUN?cluster=devnet)
 
 ## Why Solana?
 
