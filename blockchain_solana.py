@@ -274,9 +274,10 @@ class BlockchainClientSolana:
         tx_sig = str(tx_resp.value)
         self.logger.info(f"Transaction sent: {tx_sig}")
 
-        # Wait for confirmation
+        # Wait for confirmation - convert string to Signature object
+        tx_sig_obj = Signature.from_string(tx_sig)
         confirm_resp = self.client.confirm_transaction(
-            tx_sig,
+            tx_sig_obj,
             commitment=Confirmed
         )
 
