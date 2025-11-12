@@ -1079,7 +1079,7 @@ def detect_failure(http_status, body_length):
                                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9945FF" stroke-width="2">
                                             <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
                                         </svg>
-                                        <strong style="color: #9945FF;">Verified on Solana Testnet</strong>
+                                        <strong style="color: #9945FF;">Proof Attested on Solana Testnet</strong>
                                     </div>
                                     <div style="color: var(--text-secondary); font-size: 12px; margin-bottom: 12px;">
                                         Transaction: <code style="color: var(--accent-primary);">${claim.refund_tx_hash.substring(0, 12)}...${claim.refund_tx_hash.substring(claim.refund_tx_hash.length - 8)}</code>
@@ -1115,7 +1115,7 @@ def detect_failure(http_status, body_length):
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <polyline points="9 18 15 12 9 6"></polyline>
                                 </svg>
-                                Hide Verification Data
+                                Hide Proof Data
                             `;
                         }
                     });
@@ -1274,7 +1274,7 @@ def detect_failure(http_status, body_length):
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="9 18 15 12 9 6"></polyline>
                     </svg>
-                    Show Verification Data
+                    Show Proof Data
                 `;
             } else {
                 section.classList.add('expanded');
@@ -1283,7 +1283,7 @@ def detect_failure(http_status, body_length):
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="9 18 15 12 9 6"></polyline>
                     </svg>
-                    Hide Verification Data
+                    Hide Proof Data
                 `;
             }
         }
@@ -1625,7 +1625,7 @@ def detect_failure(http_status, body_length):
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9945FF" stroke-width="2">
                             <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
                         </svg>
-                        <strong style="color: #9945FF;">Verified on Solana Devnet</strong>
+                        <strong style="color: #9945FF;">Proof Attested on Solana Devnet</strong>
                     </div>
                     <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 4px;">
                         Payout: <strong style="color: var(--accent-primary);">${payout} USDC</strong>
