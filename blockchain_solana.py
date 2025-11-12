@@ -376,8 +376,8 @@ class BlockchainClientSolana:
                     recent_blockhash
                 )
 
-                # Send the signed transaction with blockhash
-                result = self.client.send_transaction(tx, recent_blockhash=recent_blockhash)
+                # Send the signed transaction (blockhash already embedded in tx)
+                result = self.client.send_transaction(tx)
 
                 tx_sig = str(result.value)
                 self.logger.info(f"Proof attestation transaction sent: {tx_sig}")
