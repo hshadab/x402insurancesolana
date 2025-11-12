@@ -1,0 +1,20 @@
+[package]
+name = "x402-attestation"
+version = "0.1.0"
+description = "On-chain proof attestation for x402 Insurance"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "x402_attestation"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+anchor-lang = "0.29.0"

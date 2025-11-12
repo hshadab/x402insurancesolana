@@ -23,7 +23,10 @@ class Config:
     DATABASE_URL = os.getenv("DATABASE_URL")  # If set, uses PostgreSQL
     DATA_DIR = Path(os.getenv("DATA_DIR", "data"))
 
-    # Blockchain
+    # Blockchain Network Selection
+    BLOCKCHAIN_NETWORK = os.getenv("BLOCKCHAIN_NETWORK", "base")  # "base" or "solana"
+
+    # Base Blockchain Configuration
     BASE_RPC_URL = os.getenv("BASE_RPC_URL", "https://sepolia.base.org")
     USDC_CONTRACT_ADDRESS = os.getenv(
         "USDC_CONTRACT_ADDRESS",
@@ -31,6 +34,17 @@ class Config:
     )
     BACKEND_WALLET_PRIVATE_KEY = os.getenv("BACKEND_WALLET_PRIVATE_KEY")
     BACKEND_WALLET_ADDRESS = os.getenv("BACKEND_WALLET_ADDRESS")
+
+    # Solana Blockchain Configuration
+    SOLANA_CLUSTER = os.getenv("SOLANA_CLUSTER", "devnet")  # devnet, testnet, mainnet-beta
+    SOLANA_RPC_URL = os.getenv("SOLANA_RPC_URL", "https://api.devnet.solana.com")
+    USDC_MINT_ADDRESS = os.getenv(
+        "USDC_MINT_ADDRESS",
+        "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"  # Devnet USDC
+    )
+    WALLET_KEYPAIR_PATH = os.getenv("WALLET_KEYPAIR_PATH")
+    BACKEND_WALLET_PUBKEY = os.getenv("BACKEND_WALLET_PUBKEY")
+    ATTESTATION_PROGRAM_ID = os.getenv("ATTESTATION_PROGRAM_ID")
 
     # Blockchain limits
     MAX_GAS_PRICE_GWEI = int(os.getenv("MAX_GAS_PRICE_GWEI", 100))

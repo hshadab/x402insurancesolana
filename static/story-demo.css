@@ -1,0 +1,332 @@
+/**
+ * x402 Insurance - Story Demo Styles
+ * Styles for the automated storytelling demo
+ */
+
+/* Story Overlay Container */
+#storyOverlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 9999;
+    pointer-events: none;
+    transition: opacity 0.5s ease;
+}
+
+#storyContent {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 10000;
+    opacity: 0;
+    transition: opacity 0.5s ease;
+    text-align: center;
+    max-width: 90%;
+}
+
+#storyCallouts {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 9998;
+    pointer-events: none;
+}
+
+/* Story Overlay Styles */
+.story-overlay {
+    background: linear-gradient(135deg, rgba(0, 0, 0, 0.95), rgba(20, 20, 40, 0.95));
+    border-radius: 24px;
+    padding: 40px 60px;
+    box-shadow: 0 20px 80px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(20px);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    max-width: 90vw;
+    max-height: 80vh;
+    overflow: auto;
+}
+
+.story-overlay h1 {
+    font-size: 56px;
+    font-weight: 700;
+    margin: 0 0 20px 0;
+    background: linear-gradient(135deg, #14F195, #9945FF);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    line-height: 1.2;
+}
+
+.story-overlay .subtitle {
+    font-size: 28px;
+    color: rgba(255, 255, 255, 0.8);
+    margin: 0;
+    font-weight: 400;
+}
+
+/* Problem Style */
+.story-overlay.problem {
+    background: linear-gradient(135deg, rgba(139, 0, 0, 0.95), rgba(70, 0, 0, 0.95));
+    border-color: rgba(255, 100, 100, 0.3);
+}
+
+.story-overlay.problem h1 {
+    background: linear-gradient(135deg, #FF6B6B, #FF3838);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* Solution Style */
+.story-overlay.solution {
+    background: linear-gradient(135deg, rgba(0, 100, 0, 0.95), rgba(0, 50, 0, 0.95));
+    border-color: rgba(100, 255, 100, 0.3);
+}
+
+.story-overlay.solution h1 {
+    background: linear-gradient(135deg, #14F195, #00D9FF);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* Alert Style */
+.story-overlay.alert {
+    background: linear-gradient(135deg, rgba(255, 140, 0, 0.95), rgba(139, 69, 0, 0.95));
+    border-color: rgba(255, 165, 0, 0.3);
+}
+
+.story-overlay.alert h1 {
+    background: linear-gradient(135deg, #FFA500, #FF6B00);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* Comparison Style */
+.story-overlay.comparison {
+    max-width: 95vw;
+}
+
+.comparison-grid {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 40px;
+    margin-top: 40px;
+    align-items: center;
+}
+
+.comparison-item {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 16px;
+    padding: 30px;
+    border: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+.comparison-item.left {
+    border-color: rgba(255, 100, 100, 0.3);
+}
+
+.comparison-item.right {
+    border-color: rgba(100, 255, 100, 0.3);
+    background: rgba(20, 241, 149, 0.05);
+}
+
+.comparison-item h3 {
+    font-size: 24px;
+    margin: 0 0 20px 0;
+    color: white;
+}
+
+.comparison-item .stat {
+    font-size: 48px;
+    font-weight: 700;
+    margin: 10px 0 5px 0;
+    color: #14F195;
+}
+
+.comparison-item.left .stat {
+    color: #FF6B6B;
+}
+
+.comparison-item .label {
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.6);
+    margin-bottom: 15px;
+}
+
+.comparison-vs {
+    font-size: 36px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+/* Tech Style */
+.story-overlay.tech {
+    background: linear-gradient(135deg, rgba(153, 69, 255, 0.95), rgba(80, 35, 200, 0.95));
+}
+
+.story-overlay.tech h1 {
+    background: linear-gradient(135deg, #9945FF, #14F195);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.tech-bullets {
+    list-style: none;
+    padding: 0;
+    margin: 30px 0 0 0;
+    text-align: left;
+}
+
+.tech-bullets li {
+    font-size: 28px;
+    color: rgba(255, 255, 255, 0.9);
+    margin: 20px 0;
+    padding-left: 40px;
+    position: relative;
+}
+
+.tech-bullets li:before {
+    content: "→";
+    position: absolute;
+    left: 0;
+    color: #14F195;
+    font-weight: 700;
+}
+
+/* Demo Style */
+.story-overlay.demo {
+    background: linear-gradient(135deg, rgba(0, 0, 0, 0.85), rgba(20, 20, 40, 0.85));
+    padding: 40px 60px;
+}
+
+/* Closing Style */
+.story-overlay.closing {
+    background: linear-gradient(135deg, rgba(20, 241, 149, 0.95), rgba(153, 69, 255, 0.95));
+}
+
+.story-overlay.closing h1,
+.story-overlay.closing .subtitle {
+    color: white;
+    background: none;
+    -webkit-text-fill-color: white;
+}
+
+/* Callouts */
+.story-callout {
+    position: absolute;
+    background: rgba(0, 0, 0, 0.9);
+    border-radius: 12px;
+    padding: 15px 25px;
+    font-size: 18px;
+    font-weight: 600;
+    color: white;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    backdrop-filter: blur(10px);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 9999;
+}
+
+.story-callout.error {
+    background: rgba(139, 0, 0, 0.95);
+    border-color: rgba(255, 100, 100, 0.5);
+    animation: pulse-red 2s ease-in-out infinite;
+}
+
+.story-callout.success {
+    background: rgba(0, 100, 0, 0.95);
+    border-color: rgba(100, 255, 100, 0.5);
+}
+
+.story-callout.tech {
+    background: rgba(153, 69, 255, 0.95);
+    border-color: rgba(153, 69, 255, 0.5);
+}
+
+.story-callout.highlight {
+    background: rgba(255, 165, 0, 0.95);
+    border-color: rgba(255, 165, 0, 0.5);
+}
+
+/* Highlighting */
+.story-highlighted {
+    position: relative;
+    box-shadow: 0 0 40px rgba(20, 241, 149, 0.6) !important;
+    animation: glow-green 2s ease-in-out infinite;
+}
+
+.highlighted {
+    position: relative;
+    box-shadow: 0 0 40px rgba(255, 165, 0, 0.6) !important;
+    animation: glow-orange 2s ease-in-out infinite;
+}
+
+/* Animations */
+@keyframes flash-red {
+    0%, 100% { background-color: transparent; }
+    50% { background-color: rgba(255, 0, 0, 0.3); }
+}
+
+@keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); box-shadow: 0 0 30px rgba(20, 241, 149, 0.5); }
+}
+
+@keyframes pulse-red {
+    0%, 100% { box-shadow: 0 0 20px rgba(255, 100, 100, 0.5); }
+    50% { box-shadow: 0 0 40px rgba(255, 100, 100, 0.8); }
+}
+
+@keyframes glow-green {
+    0%, 100% { box-shadow: 0 0 30px rgba(20, 241, 149, 0.4); }
+    50% { box-shadow: 0 0 50px rgba(20, 241, 149, 0.8); }
+}
+
+@keyframes glow-orange {
+    0%, 100% { box-shadow: 0 0 30px rgba(255, 165, 0, 0.4); }
+    50% { box-shadow: 0 0 50px rgba(255, 165, 0, 0.8); }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .story-overlay {
+        padding: 40px;
+        min-width: 90%;
+    }
+
+    .story-overlay h1 {
+        font-size: 36px;
+    }
+
+    .story-overlay .subtitle {
+        font-size: 20px;
+    }
+
+    .comparison-grid {
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }
+
+    .comparison-vs {
+        display: none;
+    }
+
+    .tech-bullets li {
+        font-size: 20px;
+    }
+
+    .story-callout {
+        font-size: 14px;
+        padding: 10px 15px;
+    }
+}

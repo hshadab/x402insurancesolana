@@ -1,24 +1,33 @@
 """
-x402 Insurance Service - Production-Ready Flask Server
+x402 Insurance Service - Solana-Only Production Server
+
+API Outage Protection for AI Agents on Solana
+Powered by NovaNet zkEngine + x402 Protocol
 
 Endpoints:
   GET  / - Dashboard UI (home page)
   GET  /docs - API documentation (for site viewers)
   GET  /api - API info JSON (for agents)
   GET  /api/dashboard - Dashboard data (live stats)
-  POST /insure - Create insurance policy (requires x402 payment)
-  POST /claim - Submit fraud claim
+  POST /insure - Create insurance policy (requires x402 payment on Solana)
+  POST /claim - Submit API failure claim (ZKP proof + on-chain attestation)
   POST /verify - Verify proof (public)
   GET  /proofs/<claim_id> - Get proof data (public)
   GET  /health - Health check with dependency status
   GET  /api/reserves - Reserve health status
 
-Enhanced with:
-- Proper x402 payment verification
-- Rate limiting
-- Database abstraction (JSON or PostgreSQL)
-- Reserve monitoring
-- Better error handling
+Technology Stack:
+- Solana blockchain (devnet/mainnet)
+- x402 protocol for premium payments (ed25519 signatures)
+- NovaNet zkEngine for cryptographic proof generation
+- Anchor program for on-chain proof attestation
+- SPL USDC tokens for coverage and refunds
+
+Features:
+- Micro-insurance policies (0.1-1.0 USDC coverage, 1% premium)
+- Instant claim verification (400ms finality)
+- On-chain proof attestation via Anchor
+- Real-time balance monitoring
 """
 from flask import Flask, request, jsonify, g, send_from_directory
 from flask_limiter import Limiter
@@ -35,15 +44,17 @@ from pathlib import Path
 from dotenv import load_dotenv
 from typing import Tuple, List, Optional
 
+# Load environment variables FIRST (before importing config)
+load_dotenv()
+
 from zkengine_client import ZKEngineClient
 from blockchain import BlockchainClient
+from blockchain_solana import BlockchainClientSolana
 from database import DatabaseClient
 from auth.payment_verifier import PaymentVerifier, SimplePaymentVerifier
+from payment_verifier_solana import PaymentVerifierSolana, SimplePaymentVerifierSolana
 from tasks.reserve_monitor import ReserveMonitor
 from config import get_config
-
-# Load environment
-load_dotenv()
 
 # Load configuration
 config = get_config()
@@ -88,10 +99,19 @@ else:
     limiter = DummyLimiter()
     logger.warning("Rate limiting DISABLED")
 
+# Get blockchain network
+BLOCKCHAIN_NETWORK = config.BLOCKCHAIN_NETWORK.lower()
+logger.info(f"Blockchain network: {BLOCKCHAIN_NETWORK.upper()}")
+
 # Get backend wallet address for x402 payments
-BACKEND_ADDRESS = config.BACKEND_WALLET_ADDRESS
-if not BACKEND_ADDRESS:
-    logger.warning("BACKEND_WALLET_ADDRESS not set - payment verification will fail")
+if BLOCKCHAIN_NETWORK == "solana":
+    BACKEND_ADDRESS = config.BACKEND_WALLET_PUBKEY
+    if not BACKEND_ADDRESS:
+        logger.warning("BACKEND_WALLET_PUBKEY not set - payment verification will fail")
+else:
+    BACKEND_ADDRESS = config.BACKEND_WALLET_ADDRESS
+    if not BACKEND_ADDRESS:
+        logger.warning("BACKEND_WALLET_ADDRESS not set - payment verification will fail")
 
 # Initialize services
 logger.info("Initializing services...")
@@ -99,14 +119,20 @@ logger.info("Initializing services...")
 # zkEngine
 zkengine = ZKEngineClient(config.ZKENGINE_BINARY_PATH)
 
-# Blockchain
-blockchain = BlockchainClient(
-    rpc_url=config.BASE_RPC_URL,
-    usdc_address=config.USDC_CONTRACT_ADDRESS,
-    private_key=config.BACKEND_WALLET_PRIVATE_KEY,
-    max_gas_price_gwei=config.MAX_GAS_PRICE_GWEI,
+# Blockchain (Solana-only)
+if BLOCKCHAIN_NETWORK != "solana":
+    logger.error("BLOCKCHAIN_NETWORK must be 'solana'. This service is Solana-only.")
+    raise ValueError("This service only supports Solana. Set BLOCKCHAIN_NETWORK=solana in your .env file")
+
+logger.info("Initializing Solana blockchain client")
+blockchain = BlockchainClientSolana(
+    rpc_url=config.SOLANA_RPC_URL,
+    usdc_mint=config.USDC_MINT_ADDRESS,
+    keypair_path=config.WALLET_KEYPAIR_PATH,
+    cluster=config.SOLANA_CLUSTER,
     max_retries=config.MAX_RETRIES
 )
+USDC_ADDRESS = config.USDC_MINT_ADDRESS
 
 # Database
 database = DatabaseClient(
@@ -114,19 +140,19 @@ database = DatabaseClient(
     data_dir=config.DATA_DIR
 )
 
-# Payment Verifier
+# Payment Verifier (Solana ed25519 signatures)
 if config.PAYMENT_VERIFICATION_MODE == "full" and BACKEND_ADDRESS:
-    payment_verifier = PaymentVerifier(
-        backend_address=BACKEND_ADDRESS,
-        usdc_address=config.USDC_CONTRACT_ADDRESS
+    payment_verifier = PaymentVerifierSolana(
+        backend_pubkey=BACKEND_ADDRESS,
+        usdc_mint=config.USDC_MINT_ADDRESS
     )
-    logger.info("Using FULL payment verification (EIP-712 signatures)")
+    logger.info("Using FULL Solana payment verification (ed25519 signatures)")
 else:
-    payment_verifier = SimplePaymentVerifier(
-        backend_address=BACKEND_ADDRESS or "0x0000000000000000000000000000000000000000",
-        usdc_address=config.USDC_CONTRACT_ADDRESS
+    payment_verifier = SimplePaymentVerifierSolana(
+        backend_pubkey=BACKEND_ADDRESS or "11111111111111111111111111111111",
+        usdc_mint=config.USDC_MINT_ADDRESS
     )
-    logger.info("Using SIMPLE payment verification (testing mode)")
+    logger.info("Using SIMPLE Solana payment verification (testing mode)")
 
 # Reserve Monitor
 reserve_monitor = ReserveMonitor(
@@ -162,13 +188,19 @@ def ratelimit_handler(e):
 PREMIUM_PERCENTAGE = config.PREMIUM_PERCENTAGE
 MAX_COVERAGE = config.MAX_COVERAGE_USDC
 POLICY_DURATION = config.POLICY_DURATION_HOURS
-USDC_ADDRESS = config.USDC_CONTRACT_ADDRESS
 
+logger.info("=" * 60)
 logger.info("x402 Insurance Service initialized")
+logger.info("=" * 60)
+logger.info("Network: %s (Solana-only)", BLOCKCHAIN_NETWORK.upper())
+logger.info("Cluster: %s", config.SOLANA_CLUSTER)
+logger.info("RPC: %s", config.SOLANA_RPC_URL)
+logger.info("USDC Mint: %s", USDC_ADDRESS)
 logger.info("Premium: %.4f%% of coverage amount", PREMIUM_PERCENTAGE * 100)
 logger.info("Max coverage: %s USDC", MAX_COVERAGE)
 logger.info("Payment recipient: %s", BACKEND_ADDRESS or "NOT SET")
 logger.info("Database: %s", "PostgreSQL" if config.DATABASE_URL else "JSON files")
+logger.info("=" * 60)
 
 # Backward compatibility: keep old load_data/save_data for dashboard
 DATA_DIR = config.DATA_DIR
@@ -186,6 +218,33 @@ def load_data(file_path: Path):
             return json.load(f)
     except Exception:
         return {}
+
+
+def save_data(file_path: Path, data: dict):
+    """Backward compatibility - save JSON file atomically"""
+    import tempfile
+    # Create temp file in same directory for atomic rename
+    temp_fd, temp_path = tempfile.mkstemp(
+        dir=file_path.parent,
+        prefix=f".{file_path.name}.",
+        suffix=".tmp",
+        text=True
+    )
+    try:
+        with os.fdopen(temp_fd, 'w') as f:
+            json.dump(data, f, indent=2, default=str)
+        # Atomic rename (POSIX guarantees atomicity)
+        os.replace(temp_path, file_path)
+        logger.debug("Saved data to %s", file_path)
+    except Exception as e:
+        # Clean up temp file on error
+        if os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except Exception:
+                pass
+        logger.exception("Failed to save data to %s: %s", file_path, e)
+        raise
 
 
 # Monetary helpers (USDC 6 decimals)
@@ -268,11 +327,11 @@ def process_claim_async(claim_id: str):
             return
 
         # Parse public inputs
-        is_fraud = public_inputs[0]
-        if is_fraud != 1:
-            logger.warning("No fraud detected for claim: %s", claim_id)
+        is_failure = public_inputs[0]
+        if is_failure != 1:
+            logger.warning("No API failure detected for claim: %s", claim_id)
             claim['status'] = 'failed'
-            claim['error'] = 'No fraud detected in HTTP response'
+            claim['error'] = 'No API failure detected in HTTP response'
             claims[claim_id] = claim
             save_data(CLAIMS_FILE, claims)
             return
@@ -333,9 +392,95 @@ def handle_x402_payment():
 
 
 @app.route('/')
+@limiter.exempt
 def index():
     """Serve dashboard UI"""
     return send_from_directory('static', 'dashboard.html')
+
+
+@app.route('/dashboard')
+@limiter.exempt
+def dashboard():
+    """Serve dashboard UI (alias for /)"""
+    return send_from_directory('static', 'dashboard.html')
+
+
+@app.route('/story-demo.js')
+@limiter.exempt
+def story_demo_js():
+    """Serve story demo JavaScript"""
+    return send_from_directory('static', 'story-demo.js')
+
+
+@app.route('/story-demo.css')
+@limiter.exempt
+def story_demo_css():
+    """Serve story demo CSS"""
+    return send_from_directory('static', 'story-demo.css')
+
+
+@app.route('/api/demo/transaction', methods=['POST'])
+def demo_transaction():
+    """
+    Execute a real demo transaction on Solana
+    For demonstration purposes - sends tiny USDC amounts on devnet
+
+    Request body:
+    {
+        "type": "premium" | "payout",
+        "amount": 0.001,  // USDC amount
+        "recipient": "optional_solana_address"  // If not provided, sends to/from backend wallet
+    }
+
+    Returns:
+    {
+        "success": true,
+        "txHash": "...",
+        "explorerUrl": "...",
+        "amount": 0.001
+    }
+    """
+    try:
+        data = request.get_json()
+        tx_type = data.get('type', 'payout')
+        amount_usdc = float(data.get('amount', 0.001))  # Default 0.001 USDC
+        recipient = data.get('recipient')
+
+        # Convert USDC to micro-USDC (6 decimals)
+        amount_micro_usdc = int(amount_usdc * 1_000_000)
+
+        # For demo, use backend wallet as recipient if not specified
+        if not recipient:
+            recipient = blockchain.pubkey if hasattr(blockchain, 'pubkey') else str(blockchain.pubkey)
+            recipient = str(recipient)
+
+        logger.info(f"Demo transaction: type={tx_type}, amount={amount_usdc} USDC, recipient={recipient[:8]}...")
+
+        # Execute the transaction
+        tx_hash = blockchain.issue_refund(recipient, amount_micro_usdc)
+
+        # Build explorer URL
+        cluster = os.getenv('SOLANA_CLUSTER', 'devnet')
+        explorer_url = f"https://explorer.solana.com/tx/{tx_hash}?cluster={cluster}"
+        solscan_url = f"https://solscan.io/tx/{tx_hash}?cluster={cluster}"
+
+        return jsonify({
+            "success": True,
+            "txHash": tx_hash,
+            "explorerUrl": explorer_url,
+            "solscanUrl": solscan_url,
+            "amount": amount_usdc,
+            "type": tx_type,
+            "recipient": recipient,
+            "cluster": cluster
+        })
+
+    except Exception as e:
+        logger.error(f"Demo transaction failed: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 
 @app.route('/docs')
@@ -353,7 +498,7 @@ def api_info():
         "service": "x402 Insurance API",
         "version": "1.0.0",
         "x402Version": 1,
-        "description": "ZKP-verified insurance against x402 merchant fraud. Protect your micropayment API calls with zero-knowledge proof verified insurance.",
+        "description": "ZKP-verified insurance against API failures. Protect your micropayment API calls from downtime and server errors with zero-knowledge proof verified insurance.",
         "category": "insurance",
         "provider": "x402 Insurance",
         "endpoints": {
@@ -390,6 +535,7 @@ def api_info():
 
 
 @app.route('/api/dashboard')
+@limiter.exempt
 def dashboard_data():
     """Dashboard live data"""
     # Load policies and claims
@@ -417,88 +563,7 @@ def dashboard_data():
             else:
                 claims = claims_data
 
-    # Add sample data if no real data exists
-    sample_policies = [
-        {
-            "policy_id": "sample-001",
-            "agent_address": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
-            "merchant_url": "https://api.weather.com/forecast",
-            "coverage_amount": 5000,
-            "premium": 50,
-            "status": "active",
-            "created_at": "2025-11-07T10:15:30Z",
-            "expires_at": "2025-11-08T10:15:30Z",
-            "is_sample": True
-        },
-        {
-            "policy_id": "sample-002",
-            "agent_address": "0x1234567890123456789012345678901234567890",
-            "merchant_url": "https://api.coinbase.com/v2/prices",
-            "coverage_amount": 10000,
-            "premium": 100,
-            "status": "active",
-            "created_at": "2025-11-07T14:22:15Z",
-            "expires_at": "2025-11-08T14:22:15Z",
-            "is_sample": True
-        },
-        {
-            "policy_id": "sample-003",
-            "agent_address": "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
-            "merchant_url": "https://api.openai.com/v1/completions",
-            "coverage_amount": 2500,
-            "premium": 25,
-            "status": "claimed",
-            "created_at": "2025-11-07T08:45:00Z",
-            "expires_at": "2025-11-08T08:45:00Z",
-            "is_sample": True
-        }
-    ]
-
-    sample_claims = [
-        {
-            "claim_id": "sample-claim-001",
-            "policy_id": "sample-003",
-            "agent_address": "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
-            "merchant_url": "https://api.openai.com/v1/completions",
-            "http_status": 503,
-            "payout_amount": 2500,
-            "status": "paid",
-            "refund_tx_hash": "0xabc123def456789abc123def456789abc123def456789abc123def456789abc12",
-            "proof": "0x1a2b3c4d...",
-            "created_at": "2025-11-07T09:30:45Z",
-            "is_sample": True
-        },
-        {
-            "claim_id": "sample-claim-002",
-            "policy_id": "sample-004",
-            "agent_address": "0x9876543210987654321098765432109876543210",
-            "merchant_url": "https://api.stripe.com/v1/charges",
-            "http_status": 500,
-            "payout_amount": 7500,
-            "status": "paid",
-            "refund_tx_hash": "0xdef789abc123def789abc123def789abc123def789abc123def789abc123def78",
-            "proof": "0x5e6f7g8h...",
-            "created_at": "2025-11-06T18:12:20Z",
-            "is_sample": True
-        },
-        {
-            "claim_id": "sample-claim-003",
-            "policy_id": "sample-005",
-            "agent_address": "0x5555666677778888999900001111222233334444",
-            "merchant_url": "https://api.github.com/repos",
-            "http_status": 502,
-            "payout_amount": 1000,
-            "status": "paid",
-            "refund_tx_hash": "0x9i0j1k2l3m4n5o6p7q8r9s0t1u2v3w4x5y6z7a8b9c0d1e2f3g4h5i6j7k8l9m",
-            "proof": "0x9i0j1k2l...",
-            "created_at": "2025-11-06T12:05:10Z",
-            "is_sample": True
-        }
-    ]
-
-    # Prepend sample data (so real data appears first if it exists)
-    policies = sample_policies + policies
-    claims = sample_claims + claims
+    # No sample data - show only real data from the database
 
     # Calculate stats
     total_coverage = sum(p.get('coverage_amount', 0) for p in policies if isinstance(p, dict) and p.get('status') == 'active')
@@ -509,27 +574,28 @@ def dashboard_data():
     blockchain_stats = None
     if blockchain and blockchain.has_wallet:
         try:
-            from web3 import Web3
-            w3 = blockchain.w3
+            # Solana blockchain stats
+            sol_balance = blockchain.get_sol_balance()
+            sol_balance_formatted = f"{sol_balance / 1_000_000_000:.4f}"  # Convert lamports to SOL
 
-            eth_balance = w3.eth.get_balance(blockchain.account.address)
-            eth_balance_formatted = f"{w3.from_wei(eth_balance, 'ether'):.4f}"
+            usdc_balance = blockchain.get_balance()
+            usdc_balance_formatted = f"{usdc_balance / 1_000_000:.2f}"  # Convert micro-USDC
 
-            # Get USDC balance
-            usdc_balance = 0
+            # Get current slot (Solana's equivalent of block number)
+            slot = None
             try:
-                usdc = blockchain.usdc
-                usdc_balance = usdc.functions.balanceOf(blockchain.account.address).call()
-                usdc_balance_formatted = f"{usdc_balance / 1_000_000:.2f}"
-            except:
-                usdc_balance_formatted = "0.00"
+                slot_resp = blockchain.client.get_slot()
+                slot = slot_resp.value if hasattr(slot_resp, 'value') else slot_resp
+            except Exception as e:
+                logger.debug(f"Error getting slot: {e}")
 
             blockchain_stats = {
-                "wallet_address": blockchain.account.address,
-                "block_number": w3.eth.block_number,
-                "eth_balance": eth_balance_formatted,
+                "wallet_address": blockchain.get_wallet_address(),
+                "cluster": config.SOLANA_CLUSTER,
+                "sol_balance": sol_balance_formatted,
                 "usdc_balance": usdc_balance_formatted,
-                "chain_id": w3.eth.chain_id
+                "slot": slot,
+                "network": "solana"
             }
         except Exception as e:
             logger.exception("Error getting blockchain stats: %s", e)
@@ -539,6 +605,7 @@ def dashboard_data():
     recent_claims = sorted(claims, key=lambda x: x.get('created_at', ''), reverse=True)[:5]
 
     return jsonify({
+        "network": BLOCKCHAIN_NETWORK,
         "stats": {
             "total_coverage": total_coverage,
             "total_policies": total_policies,
@@ -645,7 +712,7 @@ def agent_card():
         "agentCardVersion": "1.0",
         "identity": {
             "name": "x402 Insurance",
-            "description": "Zero-knowledge proof verified insurance against x402 merchant fraud. Protect your micropayment API calls with instant refunds.",
+            "description": "Zero-knowledge proof verified insurance against API failures. Protect your micropayment API calls from downtime and server errors with instant refunds.",
             "provider": "x402 Insurance",
             "version": "1.0.0",
             "url": base_url,
@@ -723,8 +790,8 @@ def agent_card():
             },
             {
                 "id": "submit-claim",
-                "name": "Submit Fraud Claim",
-                "description": "Submit a claim when a merchant fails to deliver. Includes zkp proof generation and instant USDC refund.",
+                "name": "Submit API Failure Claim",
+                "description": "Submit a claim when an API fails to respond properly. Includes zkp proof generation and instant USDC refund.",
                 "endpoint": f"{base_url}/claim",
                 "method": "POST",
                 "x402Required": False,
@@ -763,7 +830,7 @@ def agent_card():
             {
                 "id": "verify-proof",
                 "name": "Verify Zero-Knowledge Proof",
-                "description": "Public endpoint to verify zkp proofs. Anyone can verify fraud claims.",
+                "description": "Public endpoint to verify zkp proofs. Anyone can verify API failure claims.",
                 "endpoint": f"{base_url}/verify",
                 "method": "POST",
                 "x402Required": False,
@@ -780,7 +847,7 @@ def agent_card():
                     "type": "object",
                     "properties": {
                         "valid": {"type": "boolean"},
-                        "fraud_detected": {"type": "boolean"},
+                        "failure_detected": {"type": "boolean"},
                         "payout_amount": {"type": "number"}
                     }
                 }
@@ -788,7 +855,7 @@ def agent_card():
         ],
         "metadata": {
             "category": "insurance",
-            "tags": ["insurance", "x402", "zkp", "micropayments", "fraud-protection"],
+            "tags": ["insurance", "x402", "zkp", "micropayments", "api-protection", "downtime-protection"],
             "pricing": {
                 "model": "percentage-based",
                 "percentage": PREMIUM_PERCENTAGE,
@@ -859,6 +926,7 @@ def agent_card():
 
 
 @app.route('/health')
+@limiter.exempt
 def health():
     """Health check with real dependency status."""
     zk_status = "operational" if not getattr(zkengine, 'use_mock', True) else "mock"
@@ -935,7 +1003,7 @@ def insure():
             "x402Version": 1,
             "payment": {
                 "scheme": "exact",
-                "network": "base",
+                "network": BLOCKCHAIN_NETWORK,  # "solana"
                 "amount": str(premium_units),
                 "asset": {"address": USDC_ADDRESS, "decimals": 6, "symbol": "USDC"},
                 "pay_to": BACKEND_ADDRESS,
@@ -962,7 +1030,7 @@ def insure():
             "expected_amount": str(premium_units),
             "asset": {"address": USDC_ADDRESS, "decimals": 6, "symbol": "USDC"},
             "pay_to": BACKEND_ADDRESS,
-            "network": "base"
+            "network": BLOCKCHAIN_NETWORK  # "solana"
         }
         headers = {"X-Payment-Required": json.dumps(required)}
         return jsonify(required), 402, headers
@@ -1191,7 +1259,7 @@ def renew_policy():
 @limiter.limit("5 per hour")
 def claim():
     """
-    Submit fraud claim (supports async processing)
+    Submit API failure claim (supports async processing)
 
     Query params (optional):
       async: bool (default: false) - If true, returns immediately with status "processing"
@@ -1344,32 +1412,53 @@ def claim():
         return jsonify({"error": "Generated proof is invalid (internal error)"}), 500
 
     # Parse public inputs
-    is_fraud = public_inputs[0]
+    is_failure = public_inputs[0]
     detected_status = public_inputs[1]
     body_length = public_inputs[2]
     zkengine_payout = public_inputs[3]  # zkEngine's suggested payout (may be hardcoded)
 
-    if is_fraud != 1:
-        return jsonify({"error": "No fraud detected in HTTP response"}), 400
+    if is_failure != 1:
+        return jsonify({"error": "No API failure detected in HTTP response"}), 400
 
     # Use policy coverage amount as payout (parametric insurance)
-    # zkEngine proves fraud occurred, we pay the full coverage amount
+    # zkEngine proves API failure occurred, we pay the full coverage amount
     payout_amount = policy.get("coverage_amount")
 
-    # Issue USDC refund
     # Convert USDC to smallest units (6 decimals): 0.01 USDC = 10,000 units
     payout_amount_units = policy.get("coverage_amount_units") or to_micro(payout_amount)
 
+    # Pre-generate claim ID (needed for both attestation and record)
+    claim_id = str(uuid.uuid4())
+
+    # Store proof attestation on-chain (BEFORE refund for integrity)
+    try:
+        attestation_tx_hash = blockchain.store_proof_on_chain(
+            claim_id=claim_id,
+            proof_hash=proof_hex[:64] if len(proof_hex) > 64 else proof_hex,  # Use first 64 chars as hash
+            http_status=http_response["status"],
+            payout_amount=payout_amount_units
+        )
+        logger.info(f"Proof attestation stored on-chain: {attestation_tx_hash}")
+    except Exception as e:
+        logger.error(f"On-chain proof storage failed: {e}")
+        return jsonify({"error": f"Failed to store proof on-chain: {str(e)}"}), 500
+
+    # Issue USDC refund (AFTER proof is attested on-chain)
     try:
         refund_tx_hash = blockchain.issue_refund(
             to_address=policy["agent_address"],
             amount=payout_amount_units
         )
     except Exception as e:
-        return jsonify({"error": f"Refund failed: {str(e)}"}), 500
+        # Proof is already attested on-chain, but refund failed
+        logger.error(f"Refund failed (proof attested: {attestation_tx_hash}): {e}")
+        return jsonify({
+            "error": f"Refund failed: {str(e)}",
+            "attestation_tx_hash": attestation_tx_hash,
+            "note": "Proof was attested on-chain but refund failed. Contact support."
+        }), 500
 
     # Create claim record
-    claim_id = str(uuid.uuid4())
     http_body_hash = hashlib.sha256(http_response["body"].encode()).hexdigest()
 
     claim_record = {
@@ -1384,6 +1473,7 @@ def claim():
         "http_headers": http_response.get("headers", {}),
         "payout_amount": payout_amount,
         "payout_amount_units": payout_amount_units,
+        "attestation_tx_hash": attestation_tx_hash,  # On-chain proof attestation
         "refund_tx_hash": refund_tx_hash,
         "recipient_address": policy["agent_address"],
         "status": "paid",
@@ -1467,7 +1557,7 @@ def verify():
     Returns:
       {
         "valid": true,
-        "fraud_detected": true,
+        "failure_detected": true,
         "payout_amount": 10000
       }
     """
@@ -1481,13 +1571,13 @@ def verify():
     try:
         is_valid = zkengine.verify_proof(proof, public_inputs)
 
-        fraud_detected = public_inputs[0] == 1 if len(public_inputs) > 0 else False
+        failure_detected = public_inputs[0] == 1 if len(public_inputs) > 0 else False
         payout_amount = public_inputs[3] if len(public_inputs) > 3 else 0
 
         return jsonify({
             "valid": is_valid,
             "public_inputs": public_inputs,
-            "fraud_detected": fraud_detected,
+            "failure_detected": failure_detected,
             "payout_amount": payout_amount
         })
 

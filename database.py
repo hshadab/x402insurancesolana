@@ -107,19 +107,41 @@ class JSONFileBackend:
             return {}
 
     def _save_json(self, file_path: Path, data: Dict):
-        """Save JSON atomically"""
-        content = json.dumps(data, indent=2, default=str)
+        """Save JSON atomically with proper file locking"""
+        lock_file = Path(str(file_path) + '.lock')
+        lock_fd = None
+
         try:
-            with open(file_path, 'a+') as f:
-                try:
-                    import fcntl
-                    fcntl.flock(f, fcntl.LOCK_EX)
-                except Exception:
-                    pass
+            # Create/open lock file
+            lock_fd = os.open(lock_file, os.O_CREAT | os.O_RDWR)
+
+            # Acquire exclusive lock
+            try:
+                import fcntl
+                fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            except ImportError:
+                # Windows doesn't have fcntl, but also less likely to have race conditions
+                pass
+
+            # Write data atomically WHILE HOLDING LOCK
+            content = json.dumps(data, indent=2, default=str)
             self._atomic_write(file_path, content)
+
         except Exception as e:
             logger.exception("Failed to save %s: %s", file_path, e)
             raise
+        finally:
+            # Release lock and close lock file
+            if lock_fd is not None:
+                try:
+                    import fcntl
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                except (ImportError, Exception):
+                    pass
+                try:
+                    os.close(lock_fd)
+                except Exception:
+                    pass
 
     # Policy operations
     def create_policy(self, policy_id: str, policy_data: Dict) -> bool:
@@ -344,9 +366,23 @@ class PostgreSQLBackend:
 
     def update_policy(self, policy_id: str, updates: Dict) -> bool:
         try:
-            # Build UPDATE query dynamically
-            set_clause = ", ".join([f"{k} = %s" for k in updates.keys()])
-            values = list(updates.values()) + [policy_id]
+            # Whitelist allowed columns to prevent SQL injection
+            ALLOWED_COLUMNS = {
+                'agent_address', 'merchant_url', 'merchant_url_hash',
+                'coverage_amount', 'coverage_amount_units',
+                'premium', 'premium_units', 'status', 'expires_at'
+            }
+
+            # Filter updates to only allowed columns
+            safe_updates = {k: v for k, v in updates.items() if k in ALLOWED_COLUMNS}
+
+            if not safe_updates:
+                logger.warning("No valid columns to update for policy: %s", policy_id)
+                return False
+
+            # Build UPDATE query with whitelisted columns only
+            set_clause = ", ".join([f"{k} = %s" for k in safe_updates.keys()])
+            values = list(safe_updates.values()) + [policy_id]
 
             with self.get_connection() as conn:
                 with conn.cursor() as cur:
@@ -420,8 +456,26 @@ class PostgreSQLBackend:
 
     def update_claim(self, claim_id: str, updates: Dict) -> bool:
         try:
-            set_clause = ", ".join([f"{k} = %s" for k in updates.keys()])
-            values = list(updates.values()) + [claim_id]
+            # Whitelist allowed columns to prevent SQL injection
+            ALLOWED_COLUMNS = {
+                'policy_id', 'proof', 'public_inputs',
+                'proof_generation_time_ms', 'verification_result',
+                'http_status', 'http_body_hash', 'http_headers',
+                'payout_amount', 'payout_amount_units',
+                'refund_tx_hash', 'recipient_address',
+                'status', 'paid_at', 'error', 'failed_at'
+            }
+
+            # Filter updates to only allowed columns
+            safe_updates = {k: v for k, v in updates.items() if k in ALLOWED_COLUMNS}
+
+            if not safe_updates:
+                logger.warning("No valid columns to update for claim: %s", claim_id)
+                return False
+
+            # Build UPDATE query with whitelisted columns only
+            set_clause = ", ".join([f"{k} = %s" for k in safe_updates.keys()])
+            values = list(safe_updates.values()) + [claim_id]
 
             with self.get_connection() as conn:
                 with conn.cursor() as cur:

@@ -12,6 +12,9 @@ from eth_account.messages import encode_structured_data
 from web3 import Web3
 import time
 import logging
+import json
+import os
+from pathlib import Path
 from typing import Optional, Dict, Tuple
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
@@ -35,10 +38,17 @@ class PaymentDetails:
 class PaymentVerifier:
     """Verify x402 payments with proper signature validation"""
 
-    def __init__(self, backend_address: str, usdc_address: str):
+    def __init__(self, backend_address: str, usdc_address: str, data_dir: Path = None):
         self.backend_address = Web3.to_checksum_address(backend_address)
         self.usdc_address = Web3.to_checksum_address(usdc_address)
-        self.nonce_cache = {}  # In-memory nonce tracking (use Redis in production)
+
+        # Persistent nonce storage (survives server restarts)
+        self.data_dir = data_dir or Path("data")
+        self.data_dir.mkdir(exist_ok=True)
+        self.nonce_file = self.data_dir / "nonce_cache.json"
+
+        # Load existing nonces from persistent storage
+        self.nonce_cache = self._load_nonces()
         self.cache_cleanup_interval = 3600  # Clean up old nonces every hour
         self.last_cleanup = time.time()
 
@@ -274,13 +284,55 @@ class PaymentVerifier:
 
         return key in self.nonce_cache
 
+    def _load_nonces(self) -> dict:
+        """Load nonces from persistent storage"""
+        if not self.nonce_file.exists():
+            logger.info("No existing nonce cache found, starting fresh")
+            return {}
+        try:
+            with open(self.nonce_file, 'r') as f:
+                nonces = json.load(f)
+            logger.info("Loaded %d nonces from persistent storage", len(nonces))
+            return nonces
+        except Exception as e:
+            logger.exception("Failed to load nonce cache: %s", e)
+            return {}
+
+    def _save_nonces(self):
+        """Save nonces to persistent storage"""
+        try:
+            import tempfile
+            # Atomic write using temp file
+            temp_fd, temp_path = tempfile.mkstemp(
+                dir=self.nonce_file.parent,
+                prefix=f".{self.nonce_file.name}.",
+                suffix=".tmp",
+                text=True
+            )
+            try:
+                with os.fdopen(temp_fd, 'w') as f:
+                    json.dump(self.nonce_cache, f, indent=2)
+                os.replace(temp_path, self.nonce_file)
+                logger.debug("Saved %d nonces to persistent storage", len(self.nonce_cache))
+            except Exception:
+                if os.path.exists(temp_path):
+                    try:
+                        os.unlink(temp_path)
+                    except Exception:
+                        pass
+                raise
+        except Exception as e:
+            logger.exception("Failed to save nonce cache: %s", e)
+
     def _mark_nonce_used(self, payer: str, nonce: str, timestamp: int):
-        """Mark nonce as used"""
+        """Mark nonce as used and persist to disk"""
         key = f"{payer.lower()}:{nonce}"
         self.nonce_cache[key] = timestamp
+        # Save immediately to prevent replay attacks across restarts
+        self._save_nonces()
 
     def _cleanup_old_nonces(self):
-        """Remove nonces older than 1 hour"""
+        """Remove nonces older than 1 hour and persist"""
         current_time = int(time.time())
         cutoff_time = current_time - 3600  # 1 hour ago
 
@@ -294,6 +346,10 @@ class PaymentVerifier:
 
         self.last_cleanup = current_time
         logger.info("Cleaned up %d old nonces", len(old_nonces))
+
+        # Save after cleanup
+        if old_nonces:
+            self._save_nonces()
 
 
 class SimplePaymentVerifier:
