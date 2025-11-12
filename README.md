@@ -9,6 +9,12 @@ cryptographically-verified refunds on **Solana blockchain**.
 [![x402 Protocol](https://img.shields.io/badge/x402-Compatible-blue)](https://github.com/coinbase/x402)
 [![Solana](https://img.shields.io/badge/Solana-Devnet%20%7C%20Mainnet-14F195)](https://docs.solana.com)
 
+## Live Demo
+
+![x402 Insurance Dashboard - Solana Activity](docs/images/dashboard-screenshot.png)
+
+*Dashboard showing real Solana transactions: Proof attestations and USDC refunds confirmed on devnet*
+
 ## Status
 
 🟢 Production Ready | 🤖 Agent Discoverable | 🚀 v2.3.0 (Solana)
