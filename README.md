@@ -133,7 +133,7 @@ Pay a 1% premium → Get coverage (up to 0.1 USDC per claim) → If merchant fai
    - JSON attestation data stored immutably on-chain
    - Contains: claim_id, proof_hash (Blake3), http_status, payout_amount, timestamp
    - Publicly verifiable via Solana Explorer
-   - Example transaction: https://explorer.solana.com/tx/[signature]?cluster=devnet
+   - Example transaction: https://explorer.solana.com/tx/3VHxfgSHRsokqTRQxBiS8LX9WWYPs8M1ofRLHmXzpmuCqMYXr7D67Guz3KyFqAQ29hoSjXB5mewSKw3Ui1agzVH2?cluster=devnet
 
 3. **Ed25519 Payment Verification** (payment_verifier_solana.py:198-262)
    - Native Solana signature scheme (no secp256k1 conversion needed)
